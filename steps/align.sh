@@ -30,22 +30,26 @@ step_star() {
     log_step "$srr" "STAR" "Aligning (${layout}) ..."
     disk_usage "pre-STAR [${srr}]"
 
+    local ram_bytes=$(( MAX_MEMORY_GB * 1073741824 ))
+
     if [[ "$layout" == "PAIRED" ]]; then
         STAR \
-            --runThreadN       "$THREADS_STAR" \
-            --genomeDir        "$STAR_INDEX" \
-            --readFilesCommand "$rfcmd" \
-            --outFileNamePrefix "$out_prefix" \
-            --readFilesIn      "$CLEAN_1" "$CLEAN_2" \
+            --runThreadN          "$THREADS_STAR" \
+            --limitBAMsortRAM     "$ram_bytes" \
+            --genomeDir           "$STAR_INDEX" \
+            --readFilesCommand    "$rfcmd" \
+            --outFileNamePrefix   "$out_prefix" \
+            --readFilesIn         "$CLEAN_1" "$CLEAN_2" \
             "${_STAR_FLAGS[@]}" \
             > "${LOG_DIR}/${srr}_star.log" 2>&1
     else
         STAR \
-            --runThreadN       "$THREADS_STAR" \
-            --genomeDir        "$STAR_INDEX" \
-            --readFilesCommand "$rfcmd" \
-            --outFileNamePrefix "$out_prefix" \
-            --readFilesIn      "$CLEAN_SE" \
+            --runThreadN          "$THREADS_STAR" \
+            --limitBAMsortRAM     "$ram_bytes" \
+            --genomeDir           "$STAR_INDEX" \
+            --readFilesCommand    "$rfcmd" \
+            --outFileNamePrefix   "$out_prefix" \
+            --readFilesIn         "$CLEAN_SE" \
             "${_STAR_FLAGS[@]}" \
             > "${LOG_DIR}/${srr}_star.log" 2>&1
     fi
