@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup.sh — Interactive configurator for compute resources and species.
-# Phase 1: threads, RAM, storage  → writes config/pipeline.sh
-# Phase 2: species names + genome URLs → writes config/species.sh
+# Section 1: threads, RAM, storage  → writes config/pipeline.sh
+# Section 2: species names + genome URLs → writes config/species.sh
 # Run once before the first execution, or whenever resources or species change.
 
 set -euo pipefail
@@ -79,7 +79,7 @@ AVAIL_DISK_GB=$(df -BG . 2>/dev/null | awk 'NR==2{ gsub("G","",$4); print $4 }' 
 
 echo ""
 echo "========================================================"
-echo " Phase 1 — Compute resources"
+echo " Compute resources"
 echo " Detected CPUs  : ${MAX_CPUS}"
 echo " Available RAM  : ${AVAIL_RAM_GB} GB"
 echo " Available disk : ${AVAIL_DISK_GB} GB"
@@ -144,7 +144,7 @@ else
 fi
 
 # =============================================================================
-# Phase 2 — Species configuration
+# Species configuration
 # =============================================================================
 
 # Parse existing species entries into parallel arrays.
@@ -176,7 +176,7 @@ done
 
 echo ""
 echo "========================================================"
-echo " Phase 2 — Species configuration"
+echo " Species configuration"
 echo "========================================================"
 
 _show_species() {
@@ -215,6 +215,40 @@ if [[ -n "$toggle_input" ]]; then
             echo "  Skipping invalid number: ${n}"
         fi
     done
+fi
+
+# --- Delete species ----------------------------------------------------------
+echo ""
+echo " Enter the numbers of species to DELETE permanently (comma-separated),"
+echo " or press Enter to skip."
+read -rp " Delete: " delete_input
+
+if [[ -n "$delete_input" ]]; then
+    declare -A _del_set
+    IFS=',' read -ra del_nums <<< "$delete_input"
+    for n in "${del_nums[@]}"; do
+        n="${n// /}"
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#sp_names[@]} )); then
+            _del_set[$(( n - 1 ))]=1
+            echo "  → Removing: ${sp_names[$(( n - 1 ))]}"
+        else
+            echo "  Skipping invalid number: ${n}"
+        fi
+    done
+    # Rebuild arrays without the deleted indices
+    _new_names=(); _new_fna=(); _new_gtf=(); _new_active=()
+    for i in "${!sp_names[@]}"; do
+        [[ -n "${_del_set[$i]+x}" ]] && continue
+        _new_names+=( "${sp_names[$i]}" )
+        _new_fna+=(   "${sp_fna[$i]}" )
+        _new_gtf+=(   "${sp_gtf[$i]}" )
+        _new_active+=( "${sp_active[$i]}" )
+    done
+    sp_names=( "${_new_names[@]}" )
+    sp_fna=(   "${_new_fna[@]}" )
+    sp_gtf=(   "${_new_gtf[@]}" )
+    sp_active=( "${_new_active[@]}" )
+    unset _del_set _new_names _new_fna _new_gtf _new_active
 fi
 
 # --- Add new species ---------------------------------------------------------
