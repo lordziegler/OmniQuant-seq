@@ -9,12 +9,35 @@ _decompress_or_download() {
         echo "[SKIP] ${final_out##*/} already exists."
         return 0
     fi
-    if [[ -f "$gz_out" ]]; then
-        echo "[DECOMPRESS] ${gz_out##*/}"
+
+    if [[ ! -f "$gz_out" ]]; then
+        local attempt=1
+        while [[ "$attempt" -le "$REF_DOWNLOAD_RETRIES" ]]; do
+            echo "[DOWNLOAD] ${url##*/} (attempt ${attempt}/${REF_DOWNLOAD_RETRIES}) ..."
+            if wget --tries=3 --continue --timeout=60 -q --show-progress -O "$gz_out" "$url" \
+                && gzip -t "$gz_out" 2>/dev/null; then
+                break
+            fi
+            echo "[WARN] Download or integrity check failed for ${url##*/}."
+            rm -f "$gz_out"
+            if [[ "$attempt" -lt "$REF_DOWNLOAD_RETRIES" ]]; then
+                echo "[RETRY] Waiting ${REF_DOWNLOAD_RETRY_SLEEP}s ..."
+                sleep "$REF_DOWNLOAD_RETRY_SLEEP"
+            fi
+            attempt=$(( attempt + 1 ))
+        done
+        if [[ ! -f "$gz_out" ]]; then
+            echo "[ABORT] Failed to download a valid ${gz_out##*/} after ${REF_DOWNLOAD_RETRIES} attempts."
+            exit 1
+        fi
     else
-        echo "[DOWNLOAD] ${url##*/}"
-        wget -q --show-progress -O "$gz_out" "$url"
+        echo "[DECOMPRESS] ${gz_out##*/}"
+        if ! gzip -t "$gz_out" 2>/dev/null; then
+            echo "[ABORT] Existing file ${gz_out} is corrupt (failed gzip integrity check). Delete it and re-run."
+            exit 1
+        fi
     fi
+
     gunzip -c "$gz_out" > "$final_out"
     rm -f "$gz_out"
 }

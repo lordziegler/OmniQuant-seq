@@ -53,7 +53,7 @@ pipeline/
 │   ├── parse_runtable.py           # Parse SRA RunTable (CSV or XLSX) → samples.tsv
 │   └── build_matrix.py             # Build expression matrix and QC matrices from results
 └── tests/
-    └── test_pipeline.sh            # 17 unit tests (no external tools required)
+    └── test_pipeline.sh            # 24 unit tests (no external tools required)
 ```
 
 ---
@@ -124,6 +124,7 @@ Key flags:
 | `TEST_READS` | `100000` | Reads per sample in test mode |
 | `PIPELINE_RETRY_PASSES` | `3` | Full passes over `samples.tsv` on partial failure |
 | `PREFETCH_RETRIES` | `5` | Download attempts per sample before marking failed |
+| `REF_DOWNLOAD_RETRIES` | `3` | Genome/GTF download attempts before aborting reference build |
 | `DISK_WARN_GB` | `20` | Free-space threshold for non-fatal disk warning |
 
 ### Step 1 — Build genome references *(run once per species)*
@@ -297,11 +298,13 @@ emits a non-fatal warning when available space drops below `DISK_WARN_GB`.
 bash pipeline/tests/test_pipeline.sh
 ```
 
-17 unit tests covering:
+24 unit tests covering:
 
 - `normalize_layout` — 8 input variants (PE, SE, Paired-End, etc.)
 - `require_file` — missing file abort, existing file pass
 - `detect_inputs` — happy path, two-FASTA abort
+- `cleanup_on_error` — partial file cleanup and SIGINT trap
+- `_decompress_or_download` — corrupt gzip detection and download retry logic
 - `parse_runtable.py` — row count, SRR value, layout normalization
 
 No external bioinformatics tools required. All tests complete in < 2 seconds.
@@ -309,7 +312,7 @@ No external bioinformatics tools required. All tests complete in < 2 seconds.
 Expected output:
 
 ```
-Results: 17 passed, 0 failed.
+Results: 24 passed, 0 failed.
 ```
 
 ---
@@ -330,6 +333,8 @@ Results: 17 passed, 0 failed.
 | `DISK_WARN_GB` | `20` | Free-space warning threshold (GB) |
 | `PREFETCH_RETRIES` | `5` | Download retry attempts |
 | `PREFETCH_RETRY_SLEEP` | `30` | Seconds between retry attempts |
+| `REF_DOWNLOAD_RETRIES` | `3` | Genome/GTF download retry attempts |
+| `REF_DOWNLOAD_RETRY_SLEEP` | `15` | Seconds between reference download retries |
 | `PIPELINE_RETRY_PASSES` | `3` | Full retry passes over sample list |
 | `STAR_OVERHANG` | `149` | `sjdbOverhang` (read length − 1) |
 | `STAR_SA_INDEX_NBASES` | `13` | `genomeSAindexNbases` for ~400 Mb genomes |

@@ -10,6 +10,7 @@ mkdir -p "$LOG_DIR"
 
 source "${PIPELINE_DIR}/lib/utils.sh"
 source "${PIPELINE_DIR}/lib/cleanup.sh"
+source "${PIPELINE_DIR}/steps/build_references.sh"
 source "${PIPELINE_DIR}/steps/validate_inputs.sh"
 
 _pass=0
@@ -109,6 +110,43 @@ timeout -s INT 1 "${tmpd}/trap_test.sh" 2>/dev/null || true
 
 assert_eq "SIGINT cleanup removes STAR tmp dir" \
     "$([[ -d "${tmpd}/TESTSRR_star" ]] && echo present || echo gone)" "gone"
+rm -rf "$tmpd"
+
+# --- _decompress_or_download: aborts on corrupt existing .gz ------------------
+tmpd="$(mktemp -d)"
+printf 'not a real gzip file' > "${tmpd}/genome.fna.gz"
+
+assert_fails "corrupt existing .gz aborts" \
+    _decompress_or_download "http://example.invalid/genome.fna.gz" \
+        "${tmpd}/genome.fna.gz" "${tmpd}/genome.fa"
+rm -rf "$tmpd"
+
+# --- _decompress_or_download: retries transient download failures ------------
+tmpd="$(mktemp -d)"
+_attempt_count=0
+wget() {
+    _attempt_count=$(( _attempt_count + 1 ))
+    local out=""
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == "-O" ]]; then out="$2"; shift; fi
+        shift
+    done
+    if [[ "$_attempt_count" -lt 3 ]]; then
+        return 1
+    fi
+    printf 'fake genome content' | gzip -c > "$out"
+    return 0
+}
+REF_DOWNLOAD_RETRIES=3
+REF_DOWNLOAD_RETRY_SLEEP=0
+
+_decompress_or_download "http://example.invalid/genome.fna.gz" \
+    "${tmpd}/genome.fna.gz" "${tmpd}/genome.fa"
+
+assert_eq "download retried until success" "$_attempt_count" "3"
+assert_eq "final decompressed file created" \
+    "$([[ -f "${tmpd}/genome.fa" ]] && echo yes || echo no)" "yes"
+unset -f wget
 rm -rf "$tmpd"
 
 # --- parse_runtable.py -------------------------------------------------------
