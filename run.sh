@@ -80,7 +80,7 @@ _process_sample() {
     mkdir -p "$species_out"
 
     step_prefetch "$srr"                                   && pre_s="OK"  || { tracker_update "$srr" "$species" "$layout" "FAILED" "NA"  "NA"   "NA"   "NA"  "NA"; return; }
-    step_fastq_dump "$srr" "$layout"                       && fq_s="OK"   || { tracker_update "$srr" "$species" "$layout" "$pre_s" "FAILED" "NA" "NA"   "NA"  "NA"; return; }
+    step_fastq_dump "$srr" "$layout"                       && fq_s="OK"   || { cleanup_on_error "$srr" "${RAW_1:-}" "${RAW_2:-}" "${RAW_SE:-}"; tracker_update "$srr" "$species" "$layout" "$pre_s" "FAILED" "NA" "NA"   "NA"  "NA"; return; }
 
     [[ "$CLEAN_SRA_AFTER_FASTQ" == true ]] && cleanup_sra "$srr" "$SRA_PATH"
 
@@ -90,7 +90,7 @@ _process_sample() {
         step_fastqc "$srr" "RAW" "$RAW_SE"
     fi
 
-    step_bbduk "$srr" "$layout"                            && trim_s="OK" || { tracker_update "$srr" "$species" "$layout" "$pre_s" "$fq_s" "FAILED" "NA" "NA" "NA"; return; }
+    step_bbduk "$srr" "$layout"                            && trim_s="OK" || { cleanup_on_error "$srr" "${CLEAN_1:-}" "${CLEAN_2:-}" "${CLEAN_SE:-}" "${SINGLETONS:-}"; tracker_update "$srr" "$species" "$layout" "$pre_s" "$fq_s" "FAILED" "NA" "NA" "NA"; return; }
 
     [[ "$CLEAN_RAW_FASTQ_AFTER_RSEM" == true ]] && cleanup_raw_fastq "$srr" "${RAW_1:-}" "${RAW_2:-}" "${RAW_SE:-}"
 
@@ -103,9 +103,9 @@ _process_sample() {
         step_multiqc_sample "$srr" "SINGLE"
     fi
 
-    step_star "$srr" "$layout"                             && star_s="OK" || { tracker_update "$srr" "$species" "$layout" "$pre_s" "$fq_s" "$trim_s" "FAILED" "NA" "NA"; return; }
+    step_star "$srr" "$layout"                             && star_s="OK" || { cleanup_on_error "$srr"; tracker_update "$srr" "$species" "$layout" "$pre_s" "$fq_s" "$trim_s" "FAILED" "NA" "NA"; return; }
 
-    step_rsem "$srr" "$layout" "$species_out"              && rsem_s="OK" || { tracker_update "$srr" "$species" "$layout" "$pre_s" "$fq_s" "$trim_s" "$star_s" "FAILED" "NA"; return; }
+    step_rsem "$srr" "$layout" "$species_out"              && rsem_s="OK" || { cleanup_on_error "$srr" "${species_out}/${srr}.genes.results" "${species_out}/${srr}.isoforms.results"; tracker_update "$srr" "$species" "$layout" "$pre_s" "$fq_s" "$trim_s" "$star_s" "FAILED" "NA"; return; }
 
     genes="${species_out}/${srr}.genes.results"
     cleanup_star_tmp "$srr"

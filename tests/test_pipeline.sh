@@ -9,6 +9,7 @@ DISK_WARN_GB=5
 mkdir -p "$LOG_DIR"
 
 source "${PIPELINE_DIR}/lib/utils.sh"
+source "${PIPELINE_DIR}/lib/cleanup.sh"
 source "${PIPELINE_DIR}/steps/validate_inputs.sh"
 
 _pass=0
@@ -65,6 +66,22 @@ assert_eq "RUN_TABLE set"  "$RUN_TABLE"  "${tmpd}/SraRunTable.csv"
 # Two FASTA files should abort
 touch "${tmpd}/extra.fa.gz"
 assert_fails "detect_inputs two FASTAs" detect_inputs "$tmpd"
+rm -rf "$tmpd"
+
+# --- cleanup_on_error ---------------------------------------------------------
+tmpd="$(mktemp -d)"
+TMP_DIR="$tmpd"
+mkdir -p "${TMP_DIR}/TESTSRR_star" "${TMP_DIR}/TESTSRR_rsem_tmp"
+touch "${tmpd}/partial.genes.results" "${tmpd}/partial.isoforms.results"
+
+cleanup_on_error "TESTSRR" "${tmpd}/partial.genes.results" "${tmpd}/partial.isoforms.results"
+
+assert_eq "cleanup_on_error removes extra files" \
+    "$([[ -f "${tmpd}/partial.genes.results" ]] && echo present || echo gone)" "gone"
+assert_eq "cleanup_on_error removes STAR tmp dir" \
+    "$([[ -d "${TMP_DIR}/TESTSRR_star" ]] && echo present || echo gone)" "gone"
+assert_eq "cleanup_on_error removes RSEM tmp dir" \
+    "$([[ -d "${TMP_DIR}/TESTSRR_rsem_tmp" ]] && echo present || echo gone)" "gone"
 rm -rf "$tmpd"
 
 # --- parse_runtable.py -------------------------------------------------------
