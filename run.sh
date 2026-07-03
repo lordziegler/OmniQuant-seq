@@ -61,6 +61,13 @@ done
 mkdir -p "$LOG_DIR" "$TMP_DIR" "$RESULTS_DIR/rsem" \
          sra fastq clean_fastq fastqc_out
 
+LOCK_FILE="${TMP_DIR}/pipeline.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+    echo "[ABORT] Another instance of run.sh is already running (lock: ${LOCK_FILE})."
+    exit 1
+fi
+
 echo "============================================================"
 echo " Lepidoptera RNA-seq TPM pipeline"
 echo " Test mode : ${TEST_MODE}"

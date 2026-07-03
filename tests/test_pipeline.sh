@@ -171,6 +171,30 @@ got_layout="$(awk -F'\t' 'NR==2{print $3}' "${tmpd}/samples.tsv")"
 assert_eq "parse_runtable: correct layout" "$got_layout" "PAIRED"
 rm -rf "$tmpd"
 
+# --- flock prevents concurrent execution ------------------------------------
+tmpd="$(mktemp -d)"
+lockfile="${tmpd}/pipeline.lock"
+
+(
+    exec 200>"$lockfile"
+    flock -n 200 || exit 1
+    sleep 1
+) &
+holder_pid=$!
+sleep 0.3
+
+set +e
+(
+    exec 201>"$lockfile"
+    flock -n 201
+)
+second_result=$?
+set -e
+wait "$holder_pid"
+
+assert_eq "second concurrent lock attempt is rejected" "$second_result" "1"
+rm -rf "$tmpd"
+
 # --- Summary -----------------------------------------------------------------
 echo ""
 echo "Results: ${_pass} passed, ${_fail} failed."
