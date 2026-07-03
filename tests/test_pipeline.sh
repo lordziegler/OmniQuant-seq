@@ -84,6 +84,33 @@ assert_eq "cleanup_on_error removes RSEM tmp dir" \
     "$([[ -d "${TMP_DIR}/TESTSRR_rsem_tmp" ]] && echo present || echo gone)" "gone"
 rm -rf "$tmpd"
 
+# --- SIGINT triggers cleanup_on_error via trap --------------------------------
+tmpd="$(mktemp -d)"
+mkdir -p "${tmpd}/TESTSRR_star"
+
+command cat > "${tmpd}/trap_test.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+TMP_DIR="TMPD_PLACEHOLDER"
+LOG_DIR="TMPD_PLACEHOLDER"
+source "PIPELINE_DIR_PLACEHOLDER/lib/utils.sh"
+source "PIPELINE_DIR_PLACEHOLDER/lib/cleanup.sh"
+CURRENT_SRR="TESTSRR"
+trap 'cleanup_on_error "$CURRENT_SRR"; exit 130' SIGINT SIGTERM
+sleep 10
+EOF
+
+# Replace placeholders in the script
+sed -i "s|TMPD_PLACEHOLDER|${tmpd}|g" "${tmpd}/trap_test.sh"
+sed -i "s|PIPELINE_DIR_PLACEHOLDER|${PIPELINE_DIR}|g" "${tmpd}/trap_test.sh"
+chmod +x "${tmpd}/trap_test.sh"
+
+timeout -s INT 1 "${tmpd}/trap_test.sh" 2>/dev/null || true
+
+assert_eq "SIGINT cleanup removes STAR tmp dir" \
+    "$([[ -d "${tmpd}/TESTSRR_star" ]] && echo present || echo gone)" "gone"
+rm -rf "$tmpd"
+
 # --- parse_runtable.py -------------------------------------------------------
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/SraRunTable.csv" <<'CSV'

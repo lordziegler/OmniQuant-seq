@@ -28,6 +28,20 @@ source "${PIPELINE_DIR}/steps/align.sh"
 source "${PIPELINE_DIR}/steps/quantify.sh"
 source "${PIPELINE_DIR}/steps/postprocess.sh"
 
+# --- Signal handling ----------------------------------------------------------
+CURRENT_SRR=""
+
+_on_interrupt() {
+    echo ""
+    echo "[INTERRUPT] Signal received — cleaning up in-progress sample ..."
+    if [[ -n "$CURRENT_SRR" ]]; then
+        cleanup_on_error "$CURRENT_SRR"
+        log_step "$CURRENT_SRR" "INTERRUPT" "Run interrupted by signal; partial files removed."
+    fi
+    exit 130
+}
+trap _on_interrupt SIGINT SIGTERM
+
 # --- Argument parsing --------------------------------------------------------
 BUILD_REFS_ONLY=false
 
@@ -75,6 +89,7 @@ _process_sample() {
     local species_out="${RESULTS_DIR}/rsem/${species}"
     local pre_s="PENDING" fq_s="PENDING" trim_s="PENDING" \
           star_s="PENDING" rsem_s="PENDING" genes="NA"
+    CURRENT_SRR="$srr"
 
     resolve_reference_paths "$species"
     mkdir -p "$species_out"
