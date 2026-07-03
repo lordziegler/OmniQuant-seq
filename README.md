@@ -53,7 +53,7 @@ pipeline/
 │   ├── parse_runtable.py           # Parse SRA RunTable (CSV or XLSX) → samples.tsv
 │   └── build_matrix.py             # Build expression matrix and QC matrices from results
 └── tests/
-    └── test_pipeline.sh            # 24 unit tests (no external tools required)
+    └── test_pipeline.sh            # 25 unit tests (no external tools required)
 ```
 
 ---
@@ -298,13 +298,14 @@ emits a non-fatal warning when available space drops below `DISK_WARN_GB`.
 bash pipeline/tests/test_pipeline.sh
 ```
 
-24 unit tests covering:
+25 unit tests covering:
 
 - `normalize_layout` — 8 input variants (PE, SE, Paired-End, etc.)
 - `require_file` — missing file abort, existing file pass
 - `detect_inputs` — happy path, two-FASTA abort
 - `cleanup_on_error` — partial file cleanup and SIGINT trap
 - `_decompress_or_download` — corrupt gzip detection and download retry logic
+- `flock` concurrency lock — rejects a second concurrent lock attempt
 - `parse_runtable.py` — row count, SRR value, layout normalization
 
 No external bioinformatics tools required. All tests complete in < 2 seconds.
@@ -312,7 +313,7 @@ No external bioinformatics tools required. All tests complete in < 2 seconds.
 Expected output:
 
 ```
-Results: 24 passed, 0 failed.
+Results: 25 passed, 0 failed.
 ```
 
 ---
