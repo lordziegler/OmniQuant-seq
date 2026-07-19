@@ -11,16 +11,6 @@ from typing import Optional
 
 ACCESSION_RE = re.compile(r"^[SED]RR\d+$")
 
-SPECIES_MAP = {
-    "spodoptera frugiperda":  "Spodoptera_frugiperda",
-    "plutella xylostella":    "Plutella_xylostella",
-    "diatraea saccharalis":   "Diatraea_saccharalis",
-    "bombyx mori":            "Bombyx_mori",
-    "tecia solanivora":       "Tecia_solanivora",
-    "phyllocnistis citrella": "Phyllocnistis_citrella",
-    "helicoverpa armigera":   "Helicoverpa_armigera",
-}
-
 
 def _load(path: Path) -> list[dict]:
     if path.suffix.lower() in {".xlsx", ".xls"}:
@@ -52,9 +42,29 @@ def _get(row: dict, *keys: str) -> str:
     return ""
 
 
-def _species(organism: str, fallback: Optional[str]) -> Optional[str]:
-    org = organism.lower()
-    return next((v for k, v in SPECIES_MAP.items() if k in org), fallback)
+def _derive_key(organism: str) -> Optional[str]:
+    """Turn a scientific name into a Genus_species key, matching the naming
+    convention used by SPECIES_CONFIG in config/species.sh. Works for any taxon:
+    'Helicoverpa armigera' -> 'Helicoverpa_armigera'."""
+    tokens = organism.replace("_", " ").split()
+    if len(tokens) >= 2:
+        return f"{tokens[0].capitalize()}_{tokens[1].lower()}"
+    if tokens:
+        return tokens[0].capitalize()
+    return None
+
+
+def _species(organism: str, allowed: Optional[set], fallback: Optional[str]) -> Optional[str]:
+    """Resolve a RunTable row to a species key. The key is derived from the
+    Organism field (no hardcoded species list); `fallback` is used when the
+    field is empty or unresolvable. When `allowed` is given, only keys in that
+    set are kept, so a run processes only the species you have references for."""
+    key = _derive_key(organism) or fallback
+    if key is None:
+        return None
+    if allowed and key not in allowed:
+        return None
+    return key
 
 
 def _layout(raw: str) -> str:
@@ -70,8 +80,16 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--input",    "-i", required=True, type=Path)
     p.add_argument("--output",   "-o", default="samples.tsv", type=Path)
-    p.add_argument("--fallback", "-f", default=None)
+    p.add_argument("--fallback", "-f", default=None,
+                   help="Species key for rows with an empty/unresolvable Organism field.")
+    p.add_argument("--species",  "-s", default=None,
+                   help="Comma-separated species keys to keep (e.g. "
+                        "'Helicoverpa_armigera,Bombyx_mori'). Others are dropped. "
+                        "Omit to keep every organism found.")
     args = p.parse_args()
+
+    allowed = ({s.strip() for s in args.species.split(",") if s.strip()}
+               if args.species else None)
 
     if not args.input.exists():
         sys.exit(f"[ABORT] Input not found: {args.input}")
@@ -92,7 +110,7 @@ def main() -> None:
 
     mapped = []
     for r in sourced:
-        sp = _species(_get(r, "Organism", "organism", "scientific_name"), args.fallback)
+        sp = _species(_get(r, "Organism", "organism", "scientific_name"), allowed, args.fallback)
         if sp:
             mapped.append({**r, "_sp": sp})
 

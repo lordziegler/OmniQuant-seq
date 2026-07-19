@@ -18,6 +18,13 @@ LOG_DIR="pipeline/logs"
 TMP_DIR="pipeline/tmp"
 RESULTS_DIR="pipeline/results"
 
+# --- RunTable parsing --------------------------------------------------------
+# Species keys come from the RunTable's Organism field (Genus species ->
+# Genus_species) and are filtered against the active entries in species.sh.
+# SPECIES_FALLBACK is used only for rows whose Organism field is empty or
+# unresolvable (e.g. single-species datasets). Leave empty to disable.
+SPECIES_FALLBACK=""
+
 # --- Run behaviour -----------------------------------------------------------
 TEST_MODE=false
 TEST_READS=100000
