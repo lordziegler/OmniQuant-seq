@@ -45,3 +45,9 @@ BBDUK_HDIST=""
 CLEAN_SRA_AFTER_FASTQ=true
 CLEAN_RAW_FASTQ_AFTER_RSEM=true
 CLEAN_FASTQ_AFTER_RSEM=true
+
+# --- Optional cluster overrides ----------------------------------------------
+# When CLUSTER_CONFIG points to an existing file, it is sourced last so it can
+# override any of the resources/paths above without editing this file. It is a
+# no-op for local runs (variable unset). See config/cluster.sh and docs/CLUSTER.md.
+[[ -n "${CLUSTER_CONFIG:-}" && -f "${CLUSTER_CONFIG}" ]] && source "${CLUSTER_CONFIG}"

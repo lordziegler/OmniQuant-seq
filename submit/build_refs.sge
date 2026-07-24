@@ -1,0 +1,40 @@
+#!/bin/bash
+# Build the STAR + RSEM references only, as a single SGE job, then exit.
+#
+# References are downloaded and indexed once and reused by every sample run, so
+# it pays to build them in their own job before submitting submit/pipeline.sge.
+#
+#   cd /Storage/data1/$USER/Lepidoptera-RNAseq/pipeline
+#   qsub submit/build_refs.sge
+#
+# Monitor:  qstat -f -u '*'      Stop:  qdel <job-id>
+
+# --- SGE directives ----------------------------------------------------------
+#$ -N rnaseq_build_refs
+#$ -q all.q
+#$ -V
+#$ -cwd
+#$ -pe smp 20
+#$ -l hostname=figsrv
+#$ -j y
+
+# STAR genomeGenerate is memory-hungry; MAX_MEMORY_GB (config/cluster.sh) caps
+# it at 20 GB. If STAR reports it needs more for a large genome, raise both that
+# value and this reservation, and keep them on figsrv.
+
+set -euo pipefail
+
+# --- Software environment: environment modules -------------------------------
+# Adjust to `module avail`. Only the tools needed to download and index refs.
+module purge
+module load STAR/2.7.10a
+module load RSEM/1.3.3
+# wget/curl for reference downloads are usually available system-wide; if not,
+# load the appropriate module here.
+
+# --- Cluster overrides for run.sh --------------------------------------------
+export CLUSTER_CONFIG="${PWD}/config/cluster.sh"
+export BASE_DIR="${PWD}"
+
+# --- Launch ------------------------------------------------------------------
+bash run.sh --build-refs

@@ -1,0 +1,52 @@
+#!/bin/bash
+# Submit the full RNA-seq pipeline as a single SGE job on the CENA/USP cluster.
+#
+# Run this from the repository root, which MUST live under /Storage/data1 or
+# /Storage/data2 (never /home, never the frontend):
+#
+#   cd /Storage/data1/$USER/Lepidoptera-RNAseq/pipeline
+#   qsub submit/pipeline.sge            # full run
+#   qsub submit/pipeline.sge --test     # smoke test on a subset of reads
+#
+# Monitor:  qstat -f -u '*'      Stop:  qdel <job-id>
+#
+# NOTE: this wrapper runs the whole pipeline as ONE sequential job. STAR and
+# RSEM (the long stages) use all 20 reserved cores; the short download/QC
+# stages under-use them. That is the accepted trade-off of the single-job
+# design — see docs/CLUSTER.md.
+
+# --- SGE directives ----------------------------------------------------------
+#$ -N rnaseq_pipeline
+#$ -q all.q
+#$ -V
+#$ -cwd
+#$ -pe smp 20
+#$ -l hostname=figsrv
+#$ -j y
+
+# `-pe smp 20` on figsrv (56 cores) is ~36% of the node, within the <=60%
+# cluster policy. Remove the `-l hostname=figsrv` line to let SGE pick any
+# node, but then it may land on neotera (24 cores), where 20 slots is ~83% —
+# above policy. If you drop the pin, also lower `-pe smp` to <=14.
+
+set -euo pipefail
+
+# --- Software environment: environment modules -------------------------------
+# Placeholder names/versions — adjust to what `module avail` reports on the
+# cluster before the first real run. `module purge` first for a clean slate.
+module purge
+module load STAR/2.7.10a
+module load RSEM/1.3.3
+module load BBMap
+module load SRA-Toolkit
+module load FastQC/0.11.8
+module load MultiQC
+module load Python            # helpers/*.py need Python 3 + openpyxl
+
+# --- Cluster overrides for run.sh --------------------------------------------
+export CLUSTER_CONFIG="${PWD}/config/cluster.sh"   # sourced last by pipeline.sh
+export BASE_DIR="${PWD}"                            # data root (under /Storage)
+
+# --- Launch ------------------------------------------------------------------
+# Pass through any args (e.g. --test); default to a full run.
+bash run.sh "${@:---full}"
