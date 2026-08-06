@@ -316,6 +316,41 @@ assert_succeeds "preview: missing matrix is not fatal" preview_expression_matrix
 rm -rf "$tmpd"
 unset RESULTS_DIR ENABLE_PREVIEW PREVIEW_LINES
 
+# --- Failure cleanup ---------------------------------------------------------
+# A failed stage must drop its own half-written output and must never touch a
+# different sample's files.
+tmpd="$(mktemp -d)"
+RESULTS_DIR="$tmpd"
+TMP_DIR="${tmpd}/tmp"
+TEST_MODE=false
+TEST_READS=100
+mkdir -p "${tmpd}/rsem/Genus_species" "$TMP_DIR"
+source "${PIPELINE_DIR}/lib/cleanup.sh"
+source "${PIPELINE_DIR}/lib/sample_tracker.sh"
+source "${PIPELINE_DIR}/steps/process_sample.sh"
+tracker_init
+
+RAW_1="${tmpd}/SRR2_1.fastq"; RAW_2=""; RAW_SE=""
+CLEAN_1=""; CLEAN_2=""; CLEAN_SE=""; SINGLETONS=""
+other_sample="${tmpd}/SRR1_1.fastq"
+partial_genes="${tmpd}/rsem/Genus_species/SRR2.genes.results"
+touch "$RAW_1" "$other_sample" "$partial_genes"
+
+prefetch_status=OK; fastq_status=FAILED; trim_status=PENDING
+star_status=PENDING; rsem_status=PENDING
+_record_sample_failure SRR2 Genus_species PAIRED fastq-dump >/dev/null 2>&1
+
+assert_eq "failure cleanup: removes the failed sample's FASTQ" \
+    "$([[ -e "$RAW_1" ]] && echo yes || echo no)" "no"
+assert_eq "failure cleanup: removes the partial RSEM output" \
+    "$([[ -e "$partial_genes" ]] && echo yes || echo no)" "no"
+assert_eq "failure cleanup: keeps another sample's files" \
+    "$([[ -e "$other_sample" ]] && echo yes || echo no)" "yes"
+assert_eq "failure cleanup: records the failed stage" \
+    "$(awk -F'\t' 'NR>1{print $1"/"$7}' "$SUMMARY_FILE")" "SRR2/FAILED"
+rm -rf "$tmpd"
+unset RESULTS_DIR TMP_DIR RAW_1 RAW_2 RAW_SE CLEAN_1 CLEAN_2 CLEAN_SE SINGLETONS
+
 # --- Syntax ------------------------------------------------------------------
 syntax_errors=0
 while IFS= read -r script; do

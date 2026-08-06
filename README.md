@@ -381,6 +381,14 @@ files, so an interrupted run resumes from the last incomplete sample.
 early records the stage that failed (`FAILED`) and `NA` for the stages that
 never ran.
 
+**Data safety:** whatever the failed stage half-wrote — truncated FASTQ, partial
+BAM, incomplete `genes.results` — is deleted before the retry, so no pass ever
+reads a partial file as if it were complete. `Ctrl-C` (SIGINT) and SIGTERM do
+the same for the sample in flight, then exit 130. Only one run at a time is
+allowed: a second `run.sh` in the same directory aborts on the `flock` held at
+`pipeline/tmp/pipeline.lock`, instead of two pipelines overwriting each other's
+intermediates.
+
 ### Step 4 — Post-processing *(automatic at end of run)*
 
 `postprocess_all` runs after the sample loop. To run it manually:
@@ -598,7 +606,7 @@ sets all three to `false` automatically.
 bash pipeline/tests/test_pipeline.sh
 ```
 
-65 unit tests, no bioinformatics tool and no network access required:
+69 unit tests, no bioinformatics tool and no network access required:
 
 - `normalize_layout` — 8 input variants (PE, SE, Paired-End, …)
 - `require_file` — missing file aborts, existing file passes
@@ -617,12 +625,14 @@ bash pipeline/tests/test_pipeline.sh
   closed stdin ends the loop instead of spinning on EOF
 - expression matrix preview — header, `PREVIEW_LINES`, `ENABLE_PREVIEW=false`,
   missing matrix warns without aborting
+- failure cleanup — a failed stage drops its own partial FASTQ and RSEM output,
+  leaves other samples alone, and records the failed stage in the tracker
 - `bash -n` over every shell script in the repository
 
 Expected output:
 
 ```
-Results: 65 passed, 0 failed.
+Results: 69 passed, 0 failed.
 ```
 
 ---
