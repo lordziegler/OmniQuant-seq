@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # STAR alignment. On success sets global: BAM_PATH.
 
-# ENCODE-standard flags used throughout.
+# ENCODE long-RNA-seq standard flags. Same settings for every organism —
+# organism-dependent knobs (STAR_OVERHANG, STAR_SA_INDEX_NBASES) live in
+# config/pipeline.sh and are applied at index-build time.
 _STAR_FLAGS=(
     --outSAMtype              BAM Unsorted
     --outSAMunmapped          Within
@@ -22,56 +24,44 @@ _STAR_FLAGS=(
 step_star() {
     local srr="$1" layout="$2"
     local out_prefix="${TMP_DIR}/${srr}_star/"
+    local star_log="${LOG_DIR}/${srr}_star.log"
     mkdir -p "$out_prefix"
 
-    local rfcmd="cat"
-    [[ "${CLEAN_1:-${CLEAN_SE:-}}" == *.gz ]] && rfcmd="zcat"
+    local reads=()
+    if [[ "$layout" == "PAIRED" ]]; then
+        reads=( "$CLEAN_1" "$CLEAN_2" )
+    else
+        reads=( "$CLEAN_SE" )
+    fi
 
-    log_step "$srr" "STAR" "Aligning (${layout}) ..."
+    # BBDuk writes gzipped output; keep the plain-file path working too.
+    local read_files_command="cat"
+    [[ "${reads[0]}" == *.gz ]] && read_files_command="zcat"
+
+    log_step "$srr" "STAR" "Aligning (${layout}, ${THREADS_STAR} threads) ..."
     disk_usage "pre-STAR [${srr}]"
 
-    local ram_bytes=$(( MAX_MEMORY_GB * 1073741824 ))
-
-    if [[ "$layout" == "PAIRED" ]]; then
-        STAR \
-            --runThreadN          "$THREADS_STAR" \
-            --limitBAMsortRAM     "$ram_bytes" \
-            --genomeDir           "$STAR_INDEX" \
-            --readFilesCommand    "$rfcmd" \
-            --outFileNamePrefix   "$out_prefix" \
-            --readFilesIn         "$CLEAN_1" "$CLEAN_2" \
-            "${_STAR_FLAGS[@]}" \
-            > "${LOG_DIR}/${srr}_star.log" 2>&1
-    else
-        STAR \
-            --runThreadN          "$THREADS_STAR" \
-            --limitBAMsortRAM     "$ram_bytes" \
-            --genomeDir           "$STAR_INDEX" \
-            --readFilesCommand    "$rfcmd" \
-            --outFileNamePrefix   "$out_prefix" \
-            --readFilesIn         "$CLEAN_SE" \
-            "${_STAR_FLAGS[@]}" \
-            > "${LOG_DIR}/${srr}_star.log" 2>&1
-    fi
+    STAR \
+        --runThreadN          "$THREADS_STAR" \
+        --limitBAMsortRAM     "$(( MAX_MEMORY_GB * 1073741824 ))" \
+        --genomeDir           "$STAR_INDEX" \
+        --readFilesCommand    "$read_files_command" \
+        --outFileNamePrefix   "$out_prefix" \
+        --readFilesIn         "${reads[@]}" \
+        "${_STAR_FLAGS[@]}" \
+        > "$star_log" 2>&1
 
     BAM_PATH="${out_prefix}Aligned.toTranscriptome.out.bam"
     if [[ ! -f "$BAM_PATH" ]]; then
-        log_step "$srr" "ERROR" "STAR produced no transcriptome BAM. See: ${LOG_DIR}/${srr}_star.log"
-        tail -n 30 "${LOG_DIR}/${srr}_star.log" >&2 || true
+        log_step "$srr" "ERROR" "STAR produced no transcriptome BAM. See: ${star_log}"
+        tail -n 30 "$star_log" >&2 || true
         return 1
     fi
 
-    # Copy mapping stats for the QC matrix
-    [[ -f "${out_prefix}Log.final.out" ]] && \
+    # Keep the mapping stats where build_matrix.py looks for them.
+    if [[ -f "${out_prefix}Log.final.out" ]]; then
         cp "${out_prefix}Log.final.out" "${LOG_DIR}/${srr}_STAR_Log.final.out"
+    fi
 
     log_step "$srr" "STAR" "BAM: ${BAM_PATH}"
-}
-
-resolve_reference_paths() {
-    local species="$1"
-    STAR_INDEX="${REFERENCES_DIR}/${species}/STAR_genome_index"
-    RSEM_REF="${REFERENCES_DIR}/${species}/rsem_ref"
-    require_dir  "$STAR_INDEX"     "Run: bash pipeline/run.sh --build-refs"
-    require_file "${RSEM_REF}.grp" "Run: bash pipeline/run.sh --build-refs"
 }
