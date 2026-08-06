@@ -10,6 +10,7 @@ PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${PIPELINE_DIR}/config/pipeline.sh"
 source "${PIPELINE_DIR}/config/species.sh"
 source "${PIPELINE_DIR}/lib/utils.sh"
+source "${PIPELINE_DIR}/lib/menu.sh"
 source "${PIPELINE_DIR}/lib/species_config.sh"
 source "${PIPELINE_DIR}/lib/cleanup.sh"
 source "${PIPELINE_DIR}/lib/sample_tracker.sh"
@@ -25,18 +26,18 @@ source "${PIPELINE_DIR}/steps/quantify.sh"
 source "${PIPELINE_DIR}/steps/process_sample.sh"
 source "${PIPELINE_DIR}/steps/postprocess.sh"
 
-# --- Example run -------------------------------------------------------------
 # Reference dataset shipped with the repository: one small paired-end
 # Helicoverpa armigera RNA-seq run (~620 MB SRA, 10.5 M spots).
-EXAMPLE_SPECIES="Helicoverpa_armigera"
+# EXAMPLE_SPECIES and EXAMPLE_READS come from config/pipeline.sh.
 EXAMPLE_RUN_TABLE="${PIPELINE_DIR}/examples/SraRunTable.example.csv"
-EXAMPLE_READS=25000
 
 usage() {
     cat <<EOF
 OmniQuant-seq — RNA-seq TPM/FPKM quantification for any organism.
 
-Usage: bash pipeline/run.sh [MODE]
+Usage:
+  bash pipeline/run.sh              Interactive menu (on a terminal)
+  bash pipeline/run.sh [MODE]       Non-interactive, scriptable run
 
 Modes:
   --build-refs   Download genome + annotation for every active species in
@@ -52,10 +53,22 @@ Modes:
                  the intermediate files so each stage can be inspected. The
                  ${EXAMPLE_SPECIES} references are built first if
                  they do not exist yet.
-  -h, --help     Show this message.
 
-With no mode, the pipeline runs with the TEST_MODE value from
-config/pipeline.sh (currently: ${TEST_MODE}).
+Options:
+  -i, --interactive  Show the menu even when other arguments are given.
+  --no-preview       Do not print the expression matrix preview at the end.
+  -h, --help         Show this message.
+
+Examples:
+  bash pipeline/run.sh                      # menu: configure, build, run
+  bash pipeline/run.sh --example            # bundled ${EXAMPLE_SPECIES} demo
+  bash pipeline/run.sh --build-refs         # indexes only, once per species
+  bash pipeline/run.sh --test               # smoke test on your samples
+  bash pipeline/run.sh --full --no-preview  # production run, quiet ending
+  bash pipeline/setup.sh --add-species      # add an organism + fetch its genome
+
+With no mode and no terminal attached (cron, cluster job), the pipeline runs
+with the TEST_MODE value from config/pipeline.sh (currently: ${TEST_MODE}).
 
 Inputs are read from the current directory: exactly one SRA RunTable
 (*RunTable*.csv or .xlsx) is required; a local *.fna.gz plus *.gtf.gz is used
@@ -67,6 +80,11 @@ Outputs:
   pipeline/results/qc/       MultiQC reports
   pipeline/logs/             per-sample and per-tool logs
 
+A run ends by printing the first ${PREVIEW_LINES} lines of
+pipeline/results/tables/gene_expression_matrix.tsv (the inner join of every
+sample). Change PREVIEW_LINES / ENABLE_PREVIEW in config/pipeline.sh, or pass
+--no-preview.
+
 Species are configured in config/species.sh. To add one interactively
 (with genome download):  bash pipeline/setup.sh --add-species
 EOF
@@ -75,14 +93,19 @@ EOF
 # --- Argument parsing --------------------------------------------------------
 BUILD_REFS_ONLY=false
 EXAMPLE_MODE=false
+FORCE_MENU=false
+NO_ARGS=false
+[[ $# -eq 0 ]] && NO_ARGS=true
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --test)       TEST_MODE=true;      shift ;;
-        --full)       TEST_MODE=false;     shift ;;
-        --build-refs) BUILD_REFS_ONLY=true; shift ;;
-        --example)    EXAMPLE_MODE=true;   shift ;;
-        -h|--help)    usage; exit 0 ;;
+        --test)          TEST_MODE=true;       shift ;;
+        --full)          TEST_MODE=false;      shift ;;
+        --build-refs)    BUILD_REFS_ONLY=true; shift ;;
+        --example)       EXAMPLE_MODE=true;    shift ;;
+        --no-preview)    ENABLE_PREVIEW=false; shift ;;
+        -i|--interactive) FORCE_MENU=true;     shift ;;
+        -h|--help)       usage; exit 0 ;;
         *)
             echo "[ABORT] Unknown argument: $1" >&2
             echo "" >&2
@@ -90,6 +113,14 @@ while [[ $# -gt 0 ]]; do
             exit 1 ;;
     esac
 done
+
+# --- Interactive menu --------------------------------------------------------
+# Bare `run.sh` on a terminal is a request for help, not for a production run;
+# without a terminal it keeps behaving as a scriptable default run.
+if [[ "$FORCE_MENU" == true ]] || { [[ "$NO_ARGS" == true ]] && [[ -t 0 ]]; }; then
+    menu_main
+    exit 0
+fi
 
 # --- Example mode overrides --------------------------------------------------
 # Restricts the run to the bundled dataset and keeps intermediates so the

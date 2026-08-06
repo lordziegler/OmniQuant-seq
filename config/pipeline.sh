@@ -32,6 +32,18 @@ PIPELINE_RETRY_PASSES=3
 PREFETCH_RETRIES=5
 PREFETCH_RETRY_SLEEP=30
 
+# --- Example run -------------------------------------------------------------
+# Dataset shipped with the repository and used by run.sh --example.
+EXAMPLE_SPECIES="Helicoverpa_armigera"
+EXAMPLE_READS=25000
+
+# --- Result preview ----------------------------------------------------------
+# At the end of a run the first PREVIEW_LINES lines of the expression matrix
+# are printed, as a quick check that the inner join produced data.
+# Disable with ENABLE_PREVIEW=false or run.sh --no-preview.
+ENABLE_PREVIEW=true
+PREVIEW_LINES=10
+
 # --- STAR --------------------------------------------------------------------
 STAR_OVERHANG=99
 STAR_SA_INDEX_NBASES=12
