@@ -41,6 +41,9 @@ prefetch → fastq-dump/fasterq-dump → FastQC (raw) → BBDuk
 conda env create -f environment.yml
 conda activate omniquant-seq
 
+# Interactive menu — configure, build references, run
+bash pipeline/run.sh
+
 # See every mode and what it does
 bash pipeline/run.sh --help
 
@@ -48,10 +51,32 @@ bash pipeline/run.sh --help
 bash pipeline/run.sh --example
 ```
 
+Run with no arguments on a terminal and both entry points open the same menu:
+
+```
+============================================================
+ OmniQuant-seq — RNA-seq expression pipeline
+
+ Select an option:
+   [1] Configure pipeline resources
+   [2] Configure species (interactive)
+   [3] Build references
+   [4] Run test mode
+   [5] Run example (Helicoverpa_armigera)
+   [6] Run full production
+   [7] Exit
+============================================================
+ Option [1-7]:
+```
+
+Every option simply re-enters `run.sh` / `setup.sh` with the matching flag, so
+the menu and the scriptable CLI can never diverge. Without a terminal (cron,
+cluster job) the menu is skipped and the old non-interactive behaviour applies.
+
 For your own dataset:
 
 ```bash
-# 1. Configure compute resources and species (interactive)
+# 1. Configure compute resources and species (interactive menu)
 bash pipeline/setup.sh
 
 #    ...or add a single organism, genome download included:
@@ -82,42 +107,61 @@ Outputs are written under `pipeline/results/` and `pipeline/logs/`.
 
 | Mode | What it does |
 |:--|:--|
+| *(none)* | Interactive menu on a terminal; otherwise a normal run using `TEST_MODE` from `config/pipeline.sh`. |
 | `--build-refs` | Downloads the genome + annotation of every active species and builds the STAR and RSEM indexes, then exits. Run once per species; safe to re-run. Does **not** need a RunTable. |
 | `--test` | Full pipeline over every sample, limited to `TEST_READS` reads each. |
 | `--full` | Full pipeline over all reads. Production run. |
 | `--example` | Self-contained demo, see below. |
-| `-h`, `--help` | Usage, current defaults, and output locations. |
+| `-i`, `--interactive` | Force the menu even when other arguments are given. |
+| `--no-preview` | Skip the expression-matrix preview printed at the end of a run. |
+| `-h`, `--help` | Usage, current defaults, examples, and output locations. |
 
 ### `setup.sh`
 
 | Mode | What it does |
 |:--|:--|
-| *(none)* | Compute resources, then the species menu. |
+| *(none)* | Interactive menu. |
 | `--resources` | Compute resources only (threads, RAM, storage). |
-| `--species` | Species menu only: toggle, delete, add entries. |
+| `--species` | Species menu only: toggle, delete, add entries, then optionally download the genomes of the entries just added. |
 | `--add-species` | Add or update **one** species and fetch its reference files. |
-| `-h`, `--help` | Usage. |
+| `-i`, `--interactive` | Force the menu. |
+| `-h`, `--help` | Usage and examples. |
 
-`--add-species` prompts for three values:
+### Adding a species interactively
+
+Both `setup.sh --add-species` and option `[2]` of the menu ask the same three
+questions, after explaining what a species key is and why it must be
+`Genus_species`:
 
 ```
-  Insert the name of the species (e.g. Helicoverpa_armigera): Danio_rerio
+  Insert the name of the species (e.g. Helicoverpa_armigera). This key will be
+  used as the directory name and to route samples to references, so it must be
+  written as Genus_species — the same form parse_runtable.py derives from the
+  RunTable "Organism" column.
+
+  Species key: Danio_rerio
   Genome FASTA URL (.fna.gz): https://ftp.ncbi.nlm.nih.gov/.../GCF_..._genomic.fna.gz
   Annotation GTF URL (.gtf.gz): https://ftp.ncbi.nlm.nih.gov/.../GCF_..._genomic.gtf.gz
 ```
 
-and then
+The key must be non-empty and contain at least one underscore; both URLs must
+start with `http://` or `https://`. Invalid answers are rejected and asked
+again. Then the flow
 
 1. writes (or updates) the entry in `config/species.sh` as
-   `"species_key|genome_fna_gz_url|genome_gtf_gz_url|active"`;
+   `"species_key|genome_fna_gz_url|genome_gtf_gz_url|active"`, with
+   `active=true`;
 2. creates `references/<species_key>/`;
 3. downloads and decompresses both files into
    `references/<species_key>/genome.fa` and `.../genes.gtf`, the layout STAR
    and RSEM expect.
 
-On success it prints the species, both file paths, and the command to build the
-indexes. On failure it says which step failed, keeps the config entry so the
-URLs can be corrected, and exits non-zero.
+On success it prints
+`Species <species_key> configured successfully. Files downloaded to
+references/<species_key>/ and ready for STAR/RSEM index building`, both file
+paths, and the command to build the indexes. On failure it says which step
+failed (download, decompression, config write, directory creation), keeps the
+config entry so the URLs can be corrected, and exits non-zero.
 
 ---
 
@@ -168,6 +212,8 @@ pipeline/
 │   └── species.sh                  # SPECIES_CONFIG[]: genome + GTF URLs per species
 ├── lib/
 │   ├── utils.sh                    # die, log_step, check_tools, disk_usage, downloads
+│   ├── menu.sh                     # Interactive entry menu shared by run.sh and setup.sh
+│   ├── prompt.sh                   # Validated input helpers (int, size, URL, species key)
 │   ├── species_config.sh           # Read/modify/write config/species.sh
 │   ├── cleanup.sh                  # Per-step intermediate file deletion
 │   └── sample_tracker.sh           # Atomic per-sample status TSV
@@ -182,14 +228,14 @@ pipeline/
 │   ├── align.sh                    # STAR alignment (ENCODE flags) → BAM
 │   ├── quantify.sh                 # RSEM quantification → genes.results
 │   ├── process_sample.sh           # Per-sample stage order, failure handling, retry passes
-│   └── postprocess.sh              # Expression matrix + QC matrices + global MultiQC
+│   └── postprocess.sh              # Expression matrix + QC matrices + global MultiQC + preview
 ├── helpers/
 │   ├── parse_runtable.py           # Parse SRA RunTable (CSV or XLSX) → samples.tsv
 │   └── build_matrix.py             # Build expression matrix and QC matrices from results
 ├── examples/
 │   └── SraRunTable.example.csv     # Dataset used by run.sh --example
 └── tests/
-    └── test_pipeline.sh            # 49 unit tests (no external tools, no network)
+    └── test_pipeline.sh            # 65 unit tests (no external tools, no network)
 ```
 
 **Separation of responsibilities.** `run.sh` parses flags, sources the modules
@@ -197,8 +243,10 @@ and calls four things in order: `build_all_references`, `parse_samples`,
 `run_sample_loop`, `postprocess_all`. Every `steps/*.sh` file owns one stage
 and exposes one `step_*` function; `steps/process_sample.sh` owns the order in
 which they run and what happens when one fails. Cross-cutting concerns —
-logging, aborts, downloads, disk accounting, cleanup, sample tracking — live in
-`lib/` and are never re-implemented inside a step.
+logging, aborts, downloads, disk accounting, cleanup, sample tracking,
+prompting — live in `lib/` and are never re-implemented inside a step.
+`lib/menu.sh` holds no pipeline logic at all: each option shells out to the
+entry point flag that already implements it.
 
 ---
 
@@ -347,13 +395,33 @@ python3 pipeline/helpers/build_matrix.py \
     --bbduk-out  pipeline/results/tables/BBDUK_preprocessing_QC_matrix.tsv
 ```
 
+### Step 5 — Expression matrix preview *(automatic at end of run)*
+
+`--test`, `--full` and `--example` all end by printing the head of the inner
+join, so a run finishes with visible evidence that the matrix has data:
+
+```
+[INFO] Preview of gene_expression_matrix.tsv (inner join of all samples)
+       Showing first 10 lines. Use your editor or tools like head,
+       tail, awk or visidata for full exploration.
+------------------------------------------------------------
+gene_id  SRR29271587_TPM  SRR29271587_FPKM
+...
+------------------------------------------------------------
+```
+
+Set `PREVIEW_LINES` in `config/pipeline.sh` to change how much is shown, and
+`ENABLE_PREVIEW=false` (or `run.sh --no-preview`) to turn it off. A missing
+matrix prints a `[WARN]` and never aborts the run.
+
 ---
 
 ## Adding an organism
 
 Nothing in the pipeline is tied to a taxon. To process a different organism:
 
-1. **Declare the species.** Easiest path:
+1. **Declare the species.** Easiest path — option `[2]` of the menu, or
+   directly:
 
    ```bash
    bash pipeline/setup.sh --add-species
@@ -530,7 +598,7 @@ sets all three to `false` automatically.
 bash pipeline/tests/test_pipeline.sh
 ```
 
-49 unit tests, no bioinformatics tool and no network access required:
+65 unit tests, no bioinformatics tool and no network access required:
 
 - `normalize_layout` — 8 input variants (PE, SE, Paired-End, …)
 - `require_file` — missing file aborts, existing file passes
@@ -543,13 +611,18 @@ bash pipeline/tests/test_pipeline.sh
   non-example organism, `--species` filtering, `--fallback`
 - `examples/SraRunTable.example.csv` — parses to exactly one usable sample
 - `parse_samples` — restriction to the active `SPECIES_CONFIG` species
-- CLI — `run.sh --help` documents every mode, both scripts reject unknown flags
+- CLI — both `--help` screens document every mode, both scripts reject unknown
+  flags
+- interactive menu — invalid answers are rejected and re-asked, `[7]` exits,
+  closed stdin ends the loop instead of spinning on EOF
+- expression matrix preview — header, `PREVIEW_LINES`, `ENABLE_PREVIEW=false`,
+  missing matrix warns without aborting
 - `bash -n` over every shell script in the repository
 
 Expected output:
 
 ```
-Results: 49 passed, 0 failed.
+Results: 65 passed, 0 failed.
 ```
 
 ---
@@ -580,6 +653,10 @@ Results: 49 passed, 0 failed.
 | `BBDUK_TRIMQ` | `10` | Quality trimming threshold |
 | `BBDUK_MINLEN` | `36` | Minimum read length after trimming |
 | `BBDUK_REF` | `""` | Adapter FASTA — empty disables adapter clipping |
+| `EXAMPLE_SPECIES` | `Helicoverpa_armigera` | Species used by `run.sh --example` |
+| `EXAMPLE_READS` | `25000` | Reads per sample in `--example` |
+| `ENABLE_PREVIEW` | `true` | Print the expression matrix head when a run ends |
+| `PREVIEW_LINES` | `10` | Lines shown by that preview |
 
 STAR alignment flags follow the ENCODE long-RNA-seq protocol and are collected
 in one array at the top of `steps/align.sh`.
