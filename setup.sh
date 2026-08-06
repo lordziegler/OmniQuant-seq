@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
-# setup.sh — Interactive configurator for compute resources and species.
-# Section 1: threads, RAM, storage  → writes config/pipeline.sh
-# Section 2: species names + genome URLs → writes config/species.sh
-# Run once before the first execution, or whenever resources or species change.
+# setup.sh — interactive configurator for OmniQuant-seq.
+#
+#   bash pipeline/setup.sh                 resources, then the species menu
+#   bash pipeline/setup.sh --resources     compute resources only
+#   bash pipeline/setup.sh --species       species menu only
+#   bash pipeline/setup.sh --add-species   add one species and fetch its genome
+#
+# Writes config/pipeline.sh and config/species.sh. Nothing else is modified.
 
 set -euo pipefail
+
 PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_CFG="${PIPELINE_DIR}/config/pipeline.sh"
 SPECIES_CFG="${PIPELINE_DIR}/config/species.sh"
 
+source "$PIPELINE_CFG"
+source "${PIPELINE_DIR}/lib/utils.sh"
+source "${PIPELINE_DIR}/lib/species_config.sh"
+source "${PIPELINE_DIR}/steps/build_references.sh"
+
 # =============================================================================
-# Helpers
+# Prompt helpers
 # =============================================================================
 prompt_int() {
     local var_name="$1" prompt_text="$2" current="$3" min="$4" max="$5"
@@ -52,259 +62,297 @@ prompt_url() {
     done
 }
 
-prompt_name() {
+# Species keys are Genus_species: they name the references/ subdirectory and
+# must match the key parse_runtable.py derives from the RunTable Organism field.
+prompt_species_key() {
     local var_name="$1" prompt_text="$2"
     local value
     while true; do
-        read -rp "  ${prompt_text} (e.g. Spodoptera_frugiperda): " value
+        read -rp "  ${prompt_text}: " value
         value="${value// /_}"
-        if [[ -n "$value" && "$value" =~ ^[A-Za-z][A-Za-z0-9_]+$ ]]; then
+        if [[ "$value" =~ ^[A-Za-z][A-Za-z0-9_]+$ ]]; then
             printf -v "$var_name" '%s' "$value"
             return
         fi
-        echo "  Use letters, digits, and underscores only."
+        echo "  Use letters, digits, and underscores only (e.g. Helicoverpa_armigera)."
     done
 }
 
+confirm() {
+    local answer
+    read -rp " $1 [y/N]: " answer
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
 # =============================================================================
-# Phase 1 — Compute resources
+# Compute resources → config/pipeline.sh
 # =============================================================================
-source "$PIPELINE_CFG"
+configure_resources() {
+    local max_cpus avail_ram_gb avail_disk_gb
+    local new_t_dl new_t_fqc new_t_trim new_t_star new_mem new_t_rsem \
+          new_sra_size new_disk_warn
+    max_cpus=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 64)
+    avail_ram_gb=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}' \
+                  || sysctl -n hw.memsize 2>/dev/null | awk '{printf "%d", $1/1073741824}' \
+                  || echo 64)
+    avail_disk_gb=$(df -BG . 2>/dev/null | awk 'NR==2{ gsub("G","",$4); print $4 }' || echo 999)
 
-MAX_CPUS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 64)
-AVAIL_RAM_GB=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}' \
-              || sysctl -n hw.memsize 2>/dev/null | awk '{printf "%d", $1/1073741824}' \
-              || echo 64)
-AVAIL_DISK_GB=$(df -BG . 2>/dev/null | awk 'NR==2{ gsub("G","",$4); print $4 }' || echo 999)
+    echo ""
+    echo "========================================================"
+    echo " Compute resources"
+    echo " Detected CPUs  : ${max_cpus}"
+    echo " Available RAM  : ${avail_ram_gb} GB"
+    echo " Available disk : ${avail_disk_gb} GB"
+    echo " Press Enter to keep the current value."
+    echo "========================================================"
 
-echo ""
-echo "========================================================"
-echo " Compute resources"
-echo " Detected CPUs  : ${MAX_CPUS}"
-echo " Available RAM  : ${AVAIL_RAM_GB} GB"
-echo " Available disk : ${AVAIL_DISK_GB} GB"
-echo " Press Enter to keep current value."
-echo "========================================================"
+    echo ""; echo " Download / fasterq-dump"
+    prompt_int new_t_dl   "Threads (THREADS_DOWNLOAD)" "$THREADS_DOWNLOAD" 1 "$max_cpus"
 
-echo ""
-echo " Download / fasterq-dump"
-prompt_int NEW_T_DL   "Threads (THREADS_DOWNLOAD)" "$THREADS_DOWNLOAD" 1 "$MAX_CPUS"
+    echo ""; echo " FastQC"
+    prompt_int new_t_fqc  "Threads (THREADS_FASTQC)"   "$THREADS_FASTQC"   1 "$max_cpus"
 
-echo ""
-echo " FastQC"
-prompt_int NEW_T_FQC  "Threads (THREADS_FASTQC)"   "$THREADS_FASTQC"   1 "$MAX_CPUS"
+    echo ""; echo " BBDuk trimming"
+    prompt_int new_t_trim "Threads (THREADS_TRIM)"     "$THREADS_TRIM"     1 "$max_cpus"
 
-echo ""
-echo " BBDuk trimming"
-prompt_int NEW_T_TRIM "Threads (THREADS_TRIM)"     "$THREADS_TRIM"     1 "$MAX_CPUS"
+    echo ""; echo " STAR alignment"
+    prompt_int new_t_star "Threads (THREADS_STAR)"     "$THREADS_STAR"     1 "$max_cpus"
+    prompt_int new_mem    "RAM limit GB (MAX_MEMORY_GB — passed as --limitBAMsortRAM)" \
+                          "$MAX_MEMORY_GB" 1 "$avail_ram_gb"
 
-echo ""
-echo " STAR alignment"
-prompt_int NEW_T_STAR "Threads (THREADS_STAR)"     "$THREADS_STAR"     1 "$MAX_CPUS"
-prompt_int NEW_MEM    "RAM limit GB (MAX_MEMORY_GB — passed as --limitBAMsortRAM)" \
-                      "$MAX_MEMORY_GB" 1 "$AVAIL_RAM_GB"
+    echo ""; echo " RSEM quantification"
+    prompt_int new_t_rsem "Threads (THREADS_RSEM)"     "$THREADS_RSEM"     1 "$max_cpus"
 
-echo ""
-echo " RSEM quantification"
-prompt_int NEW_T_RSEM "Threads (THREADS_RSEM)"     "$THREADS_RSEM"     1 "$MAX_CPUS"
+    echo ""; echo " Storage"
+    prompt_storage new_sra_size  "Max SRA prefetch size (MAX_SRA_SIZE)" "$MAX_SRA_SIZE"
+    prompt_int     new_disk_warn "Disk warning threshold GB (DISK_WARN_GB)" "$DISK_WARN_GB" 1 9999
 
-echo ""
-echo " Storage"
-prompt_storage NEW_SRA_SIZE  "Max SRA prefetch size (MAX_SRA_SIZE)" "$MAX_SRA_SIZE"
-prompt_int     NEW_DISK_WARN "Disk warning threshold GB (DISK_WARN_GB)" \
-                             "$DISK_WARN_GB" 1 9999
+    echo ""
+    echo "========================================================"
+    echo " Summary — compute resources:"
+    printf "  THREADS_DOWNLOAD : %s\n"    "$new_t_dl"
+    printf "  THREADS_FASTQC   : %s\n"    "$new_t_fqc"
+    printf "  THREADS_TRIM     : %s\n"    "$new_t_trim"
+    printf "  THREADS_STAR     : %s\n"    "$new_t_star"
+    printf "  MAX_MEMORY_GB    : %s GB\n" "$new_mem"
+    printf "  THREADS_RSEM     : %s\n"    "$new_t_rsem"
+    printf "  MAX_SRA_SIZE     : %s\n"    "$new_sra_size"
+    printf "  DISK_WARN_GB     : %s GB\n" "$new_disk_warn"
+    echo "========================================================"
 
-echo ""
-echo "========================================================"
-echo " Summary — compute resources:"
-printf "  THREADS_DOWNLOAD : %s\n"    "$NEW_T_DL"
-printf "  THREADS_FASTQC   : %s\n"    "$NEW_T_FQC"
-printf "  THREADS_TRIM     : %s\n"    "$NEW_T_TRIM"
-printf "  THREADS_STAR     : %s\n"    "$NEW_T_STAR"
-printf "  MAX_MEMORY_GB    : %s GB\n" "$NEW_MEM"
-printf "  THREADS_RSEM     : %s\n"    "$NEW_T_RSEM"
-printf "  MAX_SRA_SIZE     : %s\n"    "$NEW_SRA_SIZE"
-printf "  DISK_WARN_GB     : %s GB\n" "$NEW_DISK_WARN"
-echo "========================================================"
-read -rp " Write these values to config/pipeline.sh? [y/N]: " confirm
-if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    if ! confirm "Write these values to config/pipeline.sh?"; then
+        echo " Skipped — config/pipeline.sh unchanged."
+        return 0
+    fi
+
     sed -i \
-        -e "s|^THREADS_DOWNLOAD=.*|THREADS_DOWNLOAD=${NEW_T_DL}|" \
-        -e "s|^THREADS_FASTQC=.*|THREADS_FASTQC=${NEW_T_FQC}|" \
-        -e "s|^THREADS_TRIM=.*|THREADS_TRIM=${NEW_T_TRIM}|" \
-        -e "s|^THREADS_STAR=.*|THREADS_STAR=${NEW_T_STAR}|" \
-        -e "s|^MAX_MEMORY_GB=.*|MAX_MEMORY_GB=${NEW_MEM}|" \
-        -e "s|^THREADS_RSEM=.*|THREADS_RSEM=${NEW_T_RSEM}|" \
-        -e "s|^MAX_SRA_SIZE=.*|MAX_SRA_SIZE=\"${NEW_SRA_SIZE}\"|" \
-        -e "s|^DISK_WARN_GB=.*|DISK_WARN_GB=${NEW_DISK_WARN}|" \
+        -e "s|^THREADS_DOWNLOAD=.*|THREADS_DOWNLOAD=${new_t_dl}|" \
+        -e "s|^THREADS_FASTQC=.*|THREADS_FASTQC=${new_t_fqc}|" \
+        -e "s|^THREADS_TRIM=.*|THREADS_TRIM=${new_t_trim}|" \
+        -e "s|^THREADS_STAR=.*|THREADS_STAR=${new_t_star}|" \
+        -e "s|^MAX_MEMORY_GB=.*|MAX_MEMORY_GB=${new_mem}|" \
+        -e "s|^THREADS_RSEM=.*|THREADS_RSEM=${new_t_rsem}|" \
+        -e "s|^MAX_SRA_SIZE=.*|MAX_SRA_SIZE=\"${new_sra_size}\"|" \
+        -e "s|^DISK_WARN_GB=.*|DISK_WARN_GB=${new_disk_warn}|" \
         "$PIPELINE_CFG"
     echo " config/pipeline.sh updated."
-else
-    echo " Skipped — config/pipeline.sh unchanged."
-fi
+}
 
 # =============================================================================
-# Species configuration
+# Species table → config/species.sh
 # =============================================================================
-
-# Parse existing species entries into parallel arrays.
-# Each entry in SPECIES_CONFIG: "name|fna_url|gtf_url|active"
-source "$SPECIES_CFG"
-
-sp_names=()
-sp_fna=()
-sp_gtf=()
-sp_active=()
-
-for entry in "${SPECIES_CONFIG[@]}"; do
-    IFS='|' read -r _name _fna _gtf _active <<< "$entry"
-    # strip leading/trailing whitespace and backslash-continuations
-    _name="${_name//[$'\t\r\n\\']/}"
-    _name="${_name#"${_name%%[! ]*}"}"
-    _fna="${_fna//[$'\t\r\n\\']/}"
-    _fna="${_fna#"${_fna%%[! ]*}"}"
-    _gtf="${_gtf//[$'\t\r\n\\']/}"
-    _gtf="${_gtf#"${_gtf%%[! ]*}"}"
-    _active="${_active//[$'\t\r\n\\']/}"
-    _active="${_active#"${_active%%[! ]*}"}"
-    [[ -z "$_name" ]] && continue
-    sp_names+=( "$_name" )
-    sp_fna+=( "$_fna" )
-    sp_gtf+=( "$_gtf" )
-    sp_active+=( "$_active" )
-done
-
-echo ""
-echo "========================================================"
-echo " Species configuration"
-echo "========================================================"
-
-_show_species() {
+show_species() {
+    local i status
     echo ""
     echo "  #   Status  Species"
     echo "  -   ------  -------"
-    for i in "${!sp_names[@]}"; do
-        local status="[OFF]"
-        [[ "${sp_active[$i]}" == "true" ]] && status="[ON] "
-        printf "  %d   %s  %s\n" "$(( i + 1 ))" "$status" "${sp_names[$i]}"
+    for i in "${!SP_KEYS[@]}"; do
+        status="[OFF]"
+        [[ "${SP_ACTIVE[$i]}" == "true" ]] && status="[ON] "
+        printf "  %d   %s  %s\n" "$(( i + 1 ))" "$status" "${SP_KEYS[$i]}"
     done
     echo ""
 }
 
-_show_species
-
-# --- Toggle existing species -------------------------------------------------
-echo " Enter the numbers of species to toggle ON/OFF (comma-separated),"
-echo " or press Enter to keep current status."
-read -rp " Toggle: " toggle_input
-
-if [[ -n "$toggle_input" ]]; then
-    IFS=',' read -ra toggle_nums <<< "$toggle_input"
-    for n in "${toggle_nums[@]}"; do
+# Read a comma-separated list of menu numbers into the named array, as indices.
+read_species_indices() {
+    local -n out_ref="$1"
+    local input="$2"
+    local numbers=() n
+    out_ref=()
+    IFS=',' read -ra numbers <<< "$input"
+    for n in "${numbers[@]}"; do
         n="${n// /}"
-        if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#sp_names[@]} )); then
-            idx=$(( n - 1 ))
-            if [[ "${sp_active[$idx]}" == "true" ]]; then
-                sp_active[$idx]="false"
-                echo "  → ${sp_names[$idx]} set to OFF"
-            else
-                sp_active[$idx]="true"
-                echo "  → ${sp_names[$idx]} set to ON"
-            fi
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#SP_KEYS[@]} )); then
+            out_ref+=( "$(( n - 1 ))" )
         else
             echo "  Skipping invalid number: ${n}"
         fi
     done
-fi
+}
 
-# --- Delete species ----------------------------------------------------------
-echo ""
-echo " Enter the numbers of species to DELETE permanently (comma-separated),"
-echo " or press Enter to skip."
-read -rp " Delete: " delete_input
+configure_species() {
+    species_config_load "$SPECIES_CFG"
 
-if [[ -n "$delete_input" ]]; then
-    declare -A _del_set
-    IFS=',' read -ra del_nums <<< "$delete_input"
-    for n in "${del_nums[@]}"; do
-        n="${n// /}"
-        if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#sp_names[@]} )); then
-            _del_set[$(( n - 1 ))]=1
-            echo "  → Removing: ${sp_names[$(( n - 1 ))]}"
-        else
-            echo "  Skipping invalid number: ${n}"
-        fi
-    done
-    # Rebuild arrays without the deleted indices
-    _new_names=(); _new_fna=(); _new_gtf=(); _new_active=()
-    for i in "${!sp_names[@]}"; do
-        [[ -n "${_del_set[$i]+x}" ]] && continue
-        _new_names+=( "${sp_names[$i]}" )
-        _new_fna+=(   "${sp_fna[$i]}" )
-        _new_gtf+=(   "${sp_gtf[$i]}" )
-        _new_active+=( "${sp_active[$i]}" )
-    done
-    sp_names=( "${_new_names[@]}" )
-    sp_fna=(   "${_new_fna[@]}" )
-    sp_gtf=(   "${_new_gtf[@]}" )
-    sp_active=( "${_new_active[@]}" )
-    unset _del_set _new_names _new_fna _new_gtf _new_active
-fi
-
-# --- Add new species ---------------------------------------------------------
-while true; do
     echo ""
-    read -rp " Add a new species? [y/N]: " add_more
-    [[ ! "$add_more" =~ ^[Yy]$ ]] && break
+    echo "========================================================"
+    echo " Species configuration"
+    echo "========================================================"
+    show_species
 
-    prompt_name NEW_SP_NAME "Species name"
-    prompt_url  NEW_SP_FNA  "Genome FASTA URL (.fna.gz from NCBI RefSeq)"
-    prompt_url  NEW_SP_GTF  "Annotation GTF URL (.gtf.gz from NCBI RefSeq)"
-    read -rp "  Include in this run? [Y/n]: " sp_on
-    NEW_SP_ACTIVE="true"
-    [[ "$sp_on" =~ ^[Nn]$ ]] && NEW_SP_ACTIVE="false"
-
-    sp_names+=( "$NEW_SP_NAME" )
-    sp_fna+=(   "$NEW_SP_FNA" )
-    sp_gtf+=(   "$NEW_SP_GTF" )
-    sp_active+=( "$NEW_SP_ACTIVE" )
-    echo "  Added: ${NEW_SP_NAME} [${NEW_SP_ACTIVE}]"
-done
-
-# --- Show final list and confirm ---------------------------------------------
-echo ""
-echo "========================================================"
-echo " Final species list:"
-_show_species
-echo "========================================================"
-read -rp " Write this to config/species.sh? [y/N]: " confirm2
-if [[ ! "$confirm2" =~ ^[Yy]$ ]]; then
-    echo " Skipped — config/species.sh unchanged."
-else
-    {
-        echo '#!/usr/bin/env bash'
-        echo '# Species reference table — generated by setup.sh'
-        echo '# Format per entry: "name|fna_url|gtf_url|active"'
-        echo '# Set active=false to skip a species without removing the entry.'
-        echo ''
-        echo 'declare -a SPECIES_CONFIG=('
-        for i in "${!sp_names[@]}"; do
-            echo ''
-            printf '    "%s|\\\n' "${sp_names[$i]}"
-            printf '%s|\\\n'       "${sp_fna[$i]}"
-            printf '%s|\\\n'       "${sp_gtf[$i]}"
-            printf '%s"\n'         "${sp_active[$i]}"
+    echo " Enter the numbers of species to toggle ON/OFF (comma-separated),"
+    echo " or press Enter to keep the current status."
+    local toggle_input idx
+    read -rp " Toggle: " toggle_input
+    if [[ -n "$toggle_input" ]]; then
+        local to_toggle=()
+        read_species_indices to_toggle "$toggle_input"
+        for idx in "${to_toggle[@]}"; do
+            if [[ "${SP_ACTIVE[$idx]}" == "true" ]]; then
+                SP_ACTIVE[$idx]="false"; echo "  → ${SP_KEYS[$idx]} set to OFF"
+            else
+                SP_ACTIVE[$idx]="true";  echo "  → ${SP_KEYS[$idx]} set to ON"
+            fi
         done
-        echo ')'
-    } > "$SPECIES_CFG"
-    echo " config/species.sh updated."
-fi
+    fi
+
+    echo ""
+    echo " Enter the numbers of species to DELETE permanently (comma-separated),"
+    echo " or press Enter to skip."
+    local delete_input
+    read -rp " Delete: " delete_input
+    if [[ -n "$delete_input" ]]; then
+        local to_delete=()
+        read_species_indices to_delete "$delete_input"
+        local -A drop=()
+        for idx in "${to_delete[@]}"; do
+            drop[$idx]=1
+            echo "  → Removing: ${SP_KEYS[$idx]}"
+        done
+        local keys=() fna=() gtf=() active=() i
+        for i in "${!SP_KEYS[@]}"; do
+            [[ -n "${drop[$i]+x}" ]] && continue
+            keys+=( "${SP_KEYS[$i]}" ); fna+=( "${SP_FNA[$i]}" )
+            gtf+=( "${SP_GTF[$i]}" );   active+=( "${SP_ACTIVE[$i]}" )
+        done
+        SP_KEYS=( "${keys[@]}" ); SP_FNA=( "${fna[@]}" )
+        SP_GTF=( "${gtf[@]}" );   SP_ACTIVE=( "${active[@]}" )
+    fi
+
+    local new_key new_fna new_gtf new_active
+    while confirm "Add a new species?"; do
+        prompt_species_key new_key "Insert the name of the species (e.g. Helicoverpa_armigera)"
+        prompt_url         new_fna "Genome FASTA URL (.fna.gz)"
+        prompt_url         new_gtf "Annotation GTF URL (.gtf.gz)"
+        new_active="true"
+        confirm "Include in the next run?" || new_active="false"
+        species_config_upsert "$new_key" "$new_fna" "$new_gtf" "$new_active"
+        echo "  ${SPECIES_CONFIG_LAST_ACTION}: ${new_key} [${new_active}]"
+    done
+
+    echo ""
+    echo "========================================================"
+    echo " Final species list:"
+    show_species
+    echo "========================================================"
+    if confirm "Write this to config/species.sh?"; then
+        species_config_save "$SPECIES_CFG" || die "Could not write ${SPECIES_CFG}"
+        echo " config/species.sh updated."
+    else
+        echo " Skipped — config/species.sh unchanged."
+    fi
+}
 
 # =============================================================================
-echo ""
-echo "========================================================"
-echo " Setup complete. Next steps:"
-echo "   bash pipeline/run.sh --build-refs   # build genome indexes (once)"
-echo "   bash pipeline/run.sh --test          # smoke test"
-echo "   bash pipeline/run.sh --full          # full run"
-echo "========================================================"
+# Add one species and fetch its reference files
+# =============================================================================
+add_species() {
+    local key fna_url gtf_url
+
+    echo ""
+    echo "========================================================"
+    echo " Add a species"
+    echo " The genome and annotation are downloaded into"
+    echo " ${REFERENCES_DIR}/<species_key>/ and the entry is written to"
+    echo " config/species.sh."
+    echo "========================================================"
+
+    prompt_species_key key     "Insert the name of the species (e.g. Helicoverpa_armigera)"
+    prompt_url         fna_url "Genome FASTA URL (.fna.gz)"
+    prompt_url         gtf_url "Annotation GTF URL (.gtf.gz)"
+
+    echo ""
+    species_config_load "$SPECIES_CFG"
+    species_config_upsert "$key" "$fna_url" "$gtf_url" "true"
+    species_config_save "$SPECIES_CFG" \
+        || die "Could not write ${SPECIES_CFG} — check file permissions."
+    echo "[OK] Entry ${SPECIES_CONFIG_LAST_ACTION} in config/species.sh: ${key}"
+
+    echo ""
+    echo "[INFO] Fetching reference files for ${key} ..."
+    if ! fetch_species_references "$key" "$fna_url" "$gtf_url"; then
+        echo "[ERROR] Could not obtain the reference files for ${key}." >&2
+        echo "        The entry is kept in config/species.sh; check the URLs" >&2
+        echo "        and free space, then re-run: bash pipeline/setup.sh --add-species" >&2
+        return 1
+    fi
+
+    local sp_dir="${REFERENCES_DIR}/${key}"
+    echo ""
+    echo "========================================================"
+    echo " ${key} is ready."
+    echo "   Genome     : ${sp_dir}/genome.fa"
+    echo "   Annotation : ${sp_dir}/genes.gtf"
+    echo ""
+    echo " Build the STAR and RSEM indexes with:"
+    echo "   bash pipeline/run.sh --build-refs"
+    echo "========================================================"
+}
+
+# =============================================================================
+# CLI
+# =============================================================================
+usage() {
+    cat <<'EOF'
+OmniQuant-seq setup — writes config/pipeline.sh and config/species.sh.
+
+Usage: bash pipeline/setup.sh [MODE]
+
+Modes:
+  (none)          Compute resources, then the species menu.
+  --resources     Compute resources only (threads, RAM, storage).
+  --species       Species menu only (toggle, delete, add entries).
+  --add-species   Add or update one species: prompts for the species key and
+                  the genome FASTA / annotation GTF URLs, writes the entry to
+                  config/species.sh, then downloads and decompresses both files
+                  into references/<species_key>/. Exits non-zero if any step
+                  fails.
+  -h, --help      Show this message.
+EOF
+}
+
+main() {
+    case "${1:-}" in
+        "")            configure_resources; configure_species ;;
+        --resources)   configure_resources ;;
+        --species)     configure_species ;;
+        --add-species) add_species; return ;;
+        -h|--help)     usage; return 0 ;;
+        *)
+            echo "[ABORT] Unknown argument: $1" >&2
+            echo "" >&2
+            usage >&2
+            return 1 ;;
+    esac
+
+    echo ""
+    echo "========================================================"
+    echo " Setup complete. Next steps:"
+    echo "   bash pipeline/run.sh --build-refs   # build genome indexes (once)"
+    echo "   bash pipeline/run.sh --example      # small demo run"
+    echo "   bash pipeline/run.sh --test         # smoke test on your samples"
+    echo "   bash pipeline/run.sh --full         # full run"
+    echo "========================================================"
+}
+
+main "$@"
