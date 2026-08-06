@@ -1,0 +1,41 @@
+# Pipeline working directories (created at the project root by run.sh)
+sra/
+fastq/
+clean_fastq/
+fastqc_out/
+multiqc_out/
+references/
+
+# Pipeline outputs
+pipeline/logs/
+pipeline/tmp/
+pipeline/results/
+output/
+work/
+logs/
+rsem_results/
+
+# Big files
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.sam
+*.sra
+*.fna.gz
+*.gtf.gz
+!examples/*
+
+# Temporals
+*.tmp
+*.part
+*~
+*.swp
+__pycache__/
+*.pyc
+
+# Environments
+.conda/
+venv/
+.env/
