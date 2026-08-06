@@ -147,6 +147,17 @@ fi
 mkdir -p "$LOG_DIR" "$TMP_DIR" "$RESULTS_DIR/rsem" \
          sra fastq clean_fastq fastqc_out
 
+# One run at a time: two pipelines sharing sra/, fastq/ and the tracker would
+# overwrite each other's intermediates. flock is Linux-only, so a system
+# without it simply runs unlocked rather than refusing to start.
+if command -v flock &>/dev/null; then
+    LOCK_FILE="${TMP_DIR}/pipeline.lock"
+    exec 200>"$LOCK_FILE"
+    flock -n 200 || die "Another run.sh is already running (lock: ${LOCK_FILE})."
+fi
+
+trap on_interrupt SIGINT SIGTERM
+
 RUN_MODE="quantify"
 [[ "$BUILD_REFS_ONLY" == true ]] && RUN_MODE="build-refs"
 [[ "$EXAMPLE_MODE"    == true ]] && RUN_MODE="example"
