@@ -14,8 +14,10 @@ trap 'rm -rf "$LOG_DIR"' EXIT
 
 source "${PIPELINE_DIR}/lib/utils.sh"
 source "${PIPELINE_DIR}/lib/species_config.sh"
+source "${PIPELINE_DIR}/lib/menu.sh"
 source "${PIPELINE_DIR}/steps/validate_inputs.sh"
 source "${PIPELINE_DIR}/steps/parse_samples.sh"
+source "${PIPELINE_DIR}/steps/postprocess.sh"
 
 _pass=0
 _fail=0
@@ -253,13 +255,66 @@ unset SPECIES_CONFIG RUN_TABLE SAMPLES_TSV
 # --help must work without any external tool installed, so it has to be handled
 # before the pre-flight check.
 run_help="$(bash "${PIPELINE_DIR}/run.sh" --help)"
-for flag in --build-refs --test --full --example; do
+for flag in --build-refs --test --full --example --interactive --no-preview; do
     assert_eq "run.sh --help documents ${flag}" \
         "$(grep -q -- "$flag" <<< "$run_help" && echo yes || echo no)" "yes"
 done
 assert_fails "run.sh rejects unknown flags" bash "${PIPELINE_DIR}/run.sh" --nope
 assert_succeeds "setup.sh --help" bash "${PIPELINE_DIR}/setup.sh" --help
 assert_fails "setup.sh rejects unknown flags" bash "${PIPELINE_DIR}/setup.sh" --nope
+
+setup_help="$(bash "${PIPELINE_DIR}/setup.sh" --help)"
+for flag in --resources --species --add-species --interactive; do
+    assert_eq "setup.sh --help documents ${flag}" \
+        "$(grep -q -- "$flag" <<< "$setup_help" && echo yes || echo no)" "yes"
+done
+
+# --- Interactive menu --------------------------------------------------------
+# The menu must reject junk, keep asking, and leave on option 7 — all without
+# running any pipeline command.
+EXAMPLE_SPECIES="Helicoverpa_armigera"
+menu_out="$(printf '99\nzz\n\n7\n' | menu_main)"
+assert_eq "menu: rejects a non-listed number" \
+    "$(grep -c "'99' is not a valid option" <<< "$menu_out")" "1"
+assert_eq "menu: rejects non-numeric input" \
+    "$(grep -c "'zz' is not a valid option" <<< "$menu_out")" "1"
+assert_eq "menu: option 7 exits" \
+    "$(grep -c 'Bye.' <<< "$menu_out")" "1"
+assert_eq "menu: redraws after every answer" \
+    "$(grep -c '\[7\] Exit' <<< "$menu_out")" "4"
+
+# Closed stdin must end the menu instead of looping on EOF.
+assert_succeeds "menu: exits on EOF" bash -c \
+    "PIPELINE_DIR='${PIPELINE_DIR}' EXAMPLE_SPECIES=X; source '${PIPELINE_DIR}/lib/menu.sh'; menu_main </dev/null"
+
+# --- Expression matrix preview ----------------------------------------------
+tmpd="$(mktemp -d)"
+RESULTS_DIR="$tmpd"
+mkdir -p "${tmpd}/tables"
+printf 'gene_id\tSRR1_TPM\n' > "${tmpd}/tables/gene_expression_matrix.tsv"
+for i in 1 2 3 4 5; do printf 'g%s\t%s.0\n' "$i" "$i"; done \
+    >> "${tmpd}/tables/gene_expression_matrix.tsv"
+
+ENABLE_PREVIEW=true
+PREVIEW_LINES=3
+preview_out="$(preview_expression_matrix)"
+assert_eq "preview: announces the inner join" \
+    "$(grep -c 'Preview of gene_expression_matrix.tsv' <<< "$preview_out")" "1"
+assert_eq "preview: honours PREVIEW_LINES" \
+    "$(grep -c $'^g[0-9]\t' <<< "$preview_out")" "2"   # header + 2 gene rows
+
+ENABLE_PREVIEW=false
+assert_eq "preview: ENABLE_PREVIEW=false prints nothing" \
+    "$(preview_expression_matrix)" ""
+
+# A missing matrix warns but must never abort the run.
+ENABLE_PREVIEW=true
+rm -f "${tmpd}/tables/gene_expression_matrix.tsv"
+assert_eq "preview: missing matrix warns" \
+    "$(preview_expression_matrix | grep -c '\[WARN\]')" "1"
+assert_succeeds "preview: missing matrix is not fatal" preview_expression_matrix
+rm -rf "$tmpd"
+unset RESULTS_DIR ENABLE_PREVIEW PREVIEW_LINES
 
 # --- Syntax ------------------------------------------------------------------
 syntax_errors=0
