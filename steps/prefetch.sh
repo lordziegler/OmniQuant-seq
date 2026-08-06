@@ -2,35 +2,55 @@
 # Downloads an SRA archive with configurable retry.
 # On success sets global: SRA_PATH
 
-step_prefetch() {
+# prefetch writes either sra/<acc>/<acc>.sra or sra/<acc>.sra depending on the
+# SRA-Toolkit version; accept both. Sets SRA_PATH and returns 0 when found.
+_locate_sra() {
+    local srr="$1" candidate
+    for candidate in "sra/${srr}/${srr}.sra" "sra/${srr}.sra"; do
+        if [[ -f "$candidate" ]]; then
+            SRA_PATH="$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+_discard_partial_sra() {
     local srr="$1"
-    local sra_a="sra/${srr}/${srr}.sra"
-    local sra_b="sra/${srr}.sra"
+    rm -f "sra/${srr}/${srr}.sra" "sra/${srr}.sra"
+    rmdir "sra/${srr}" 2>/dev/null || true
+}
 
-    if [[ -f "$sra_a" ]]; then SRA_PATH="$sra_a"; log_step "$srr" "PREFETCH" "Already present."; return 0; fi
-    if [[ -f "$sra_b" ]]; then SRA_PATH="$sra_b"; log_step "$srr" "PREFETCH" "Already present."; return 0; fi
+step_prefetch() {
+    local srr="$1" attempt
 
-    local attempt=1
-    while [[ "$attempt" -le "$PREFETCH_RETRIES" ]]; do
-        log_step "$srr" "PREFETCH" "Attempt ${attempt}/${PREFETCH_RETRIES} ..."
+    if _locate_sra "$srr"; then
+        log_step "$srr" "PREFETCH" "Already present: ${SRA_PATH}"
+        return 0
+    fi
+
+    for (( attempt = 1; attempt <= PREFETCH_RETRIES; attempt++ )); do
+        log_step "$srr" "PREFETCH" "Attempt ${attempt}/${PREFETCH_RETRIES} (max-size ${MAX_SRA_SIZE}) ..."
 
         prefetch "$srr" \
             --output-directory sra \
             --max-size "$MAX_SRA_SIZE" \
             2>&1 | tee "${LOG_DIR}/${srr}_prefetch_${attempt}.log"
 
-        if   [[ -f "$sra_a" ]]; then SRA_PATH="$sra_a"; log_step "$srr" "PREFETCH" "Done."; return 0
-        elif [[ -f "$sra_b" ]]; then SRA_PATH="$sra_b"; log_step "$srr" "PREFETCH" "Done."; return 0
+        if _locate_sra "$srr"; then
+            log_step "$srr" "PREFETCH" "Done: ${SRA_PATH}"
+            return 0
         fi
 
+        # A failed attempt can leave a truncated archive behind; drop it so the
+        # next attempt cannot mistake it for a complete download.
         log_step "$srr" "PREFETCH" "Attempt ${attempt} failed."
-        rm -f "$sra_a" "$sra_b"; rmdir "sra/${srr}" 2>/dev/null || true
+        _discard_partial_sra "$srr"
 
-        if [[ "$attempt" -lt "$PREFETCH_RETRIES" ]]; then
+        if (( attempt < PREFETCH_RETRIES )); then
             log_step "$srr" "PREFETCH" "Waiting ${PREFETCH_RETRY_SLEEP}s ..."
             sleep "$PREFETCH_RETRY_SLEEP"
         fi
-        (( attempt++ ))
     done
 
     log_step "$srr" "ERROR" "prefetch failed after ${PREFETCH_RETRIES} attempts."

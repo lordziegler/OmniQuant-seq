@@ -2,15 +2,18 @@
 # Quality trimming with BBDuk.
 # On success sets globals: CLEAN_1, CLEAN_2, CLEAN_SE (and SINGLETONS for PE).
 
-_bbduk_args() {
-    local args=()
-    [[ -n "${BBDUK_REF:-}"   ]] && args+=("ref=${BBDUK_REF}")
-    [[ -n "${BBDUK_KTRIM:-}" ]] && args+=("ktrim=${BBDUK_KTRIM}")
-    [[ -n "${BBDUK_K:-}"     ]] && args+=("k=${BBDUK_K}")
-    [[ -n "${BBDUK_MINK:-}"  ]] && args+=("mink=${BBDUK_MINK}")
-    [[ -n "${BBDUK_HDIST:-}" ]] && args+=("hdist=${BBDUK_HDIST}")
-    args+=("qtrim=${BBDUK_QTRIM}" "trimq=${BBDUK_TRIMQ}" "minlen=${BBDUK_MINLEN}")
-    echo "${args[@]}"
+# Build the BBDuk key=value arguments into the array BBDUK_ARGS. Adapter
+# clipping is only requested when BBDUK_REF names an adapter FASTA; all values
+# come from config/pipeline.sh.
+_build_bbduk_args() {
+    BBDUK_ARGS=()
+    [[ -n "${BBDUK_REF:-}"   ]] && BBDUK_ARGS+=( "ref=${BBDUK_REF}" )
+    [[ -n "${BBDUK_KTRIM:-}" ]] && BBDUK_ARGS+=( "ktrim=${BBDUK_KTRIM}" )
+    [[ -n "${BBDUK_K:-}"     ]] && BBDUK_ARGS+=( "k=${BBDUK_K}" )
+    [[ -n "${BBDUK_MINK:-}"  ]] && BBDUK_ARGS+=( "mink=${BBDUK_MINK}" )
+    [[ -n "${BBDUK_HDIST:-}" ]] && BBDUK_ARGS+=( "hdist=${BBDUK_HDIST}" )
+    BBDUK_ARGS+=( "qtrim=${BBDUK_QTRIM}" "trimq=${BBDUK_TRIMQ}" "minlen=${BBDUK_MINLEN}" )
+    return 0
 }
 
 step_bbduk() {
@@ -22,39 +25,39 @@ step_bbduk() {
     CLEAN_SE="clean_fastq/${srr}_clean.fastq.gz"
 
     mkdir -p clean_fastq
-    read -ra _args <<< "$(_bbduk_args)"
+    _build_bbduk_args
 
+    # Expected outputs, and the input/output arguments that produce them.
+    local expected=() io_args=()
     if [[ "$layout" == "PAIRED" ]]; then
-        if [[ ! -f "$CLEAN_1" || ! -f "$CLEAN_2" ]]; then
-            log_step "$srr" "BBDUK" "Trimming PE reads ..."
-            bbduk.sh \
-                "in1=${RAW_1}" "in2=${RAW_2}" \
-                "out1=${CLEAN_1}" "out2=${CLEAN_2}" "outs=${SINGLETONS}" \
-                "t=${THREADS_TRIM}" \
-                "${_args[@]}" \
-                2>&1 | tee "${LOG_DIR}/${srr}_bbduk.log"
-        else
-            log_step "$srr" "BBDUK" "Clean PE FASTQ already present — skipping."
-        fi
-        if [[ ! -f "$CLEAN_1" || ! -f "$CLEAN_2" ]]; then
-            log_step "$srr" "ERROR" "BBDuk failed — clean paired FASTQ missing."
-            return 1
-        fi
-
+        expected=( "$CLEAN_1" "$CLEAN_2" )
+        io_args=( "in1=${RAW_1}" "in2=${RAW_2}"
+                  "out1=${CLEAN_1}" "out2=${CLEAN_2}" "outs=${SINGLETONS}" )
     else
-        if [[ ! -f "$CLEAN_SE" ]]; then
-            log_step "$srr" "BBDUK" "Trimming SE reads ..."
-            bbduk.sh \
-                "in=${RAW_SE}" "out=${CLEAN_SE}" \
-                "t=${THREADS_TRIM}" \
-                "${_args[@]}" \
-                2>&1 | tee "${LOG_DIR}/${srr}_bbduk.log"
-        else
-            log_step "$srr" "BBDUK" "Clean SE FASTQ already present — skipping."
-        fi
-        if [[ ! -f "$CLEAN_SE" ]]; then
-            log_step "$srr" "ERROR" "BBDuk failed — clean single-end FASTQ missing."
+        expected=( "$CLEAN_SE" )
+        io_args=( "in=${RAW_SE}" "out=${CLEAN_SE}" )
+    fi
+
+    local missing=false path
+    for path in "${expected[@]}"; do
+        [[ -f "$path" ]] || missing=true
+    done
+
+    if [[ "$missing" == true ]]; then
+        log_step "$srr" "BBDUK" "Trimming ${layout} reads (qtrim=${BBDUK_QTRIM}, trimq=${BBDUK_TRIMQ}, minlen=${BBDUK_MINLEN}) ..."
+        bbduk.sh \
+            "${io_args[@]}" \
+            "t=${THREADS_TRIM}" \
+            "${BBDUK_ARGS[@]}" \
+            2>&1 | tee "${LOG_DIR}/${srr}_bbduk.log"
+    else
+        log_step "$srr" "BBDUK" "Clean ${layout} FASTQ already present — skipping."
+    fi
+
+    for path in "${expected[@]}"; do
+        if [[ ! -f "$path" ]]; then
+            log_step "$srr" "ERROR" "BBDuk failed — missing ${path}. See: ${LOG_DIR}/${srr}_bbduk.log"
             return 1
         fi
-    fi
+    done
 }
