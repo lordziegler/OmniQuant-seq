@@ -1,13 +1,16 @@
-# RNA-seq TPM/FPKM Quantification Pipeline (v2.1)
+# OmniQuant-seq
+
+**RNA-seq expression pipeline for any organism with a genome and an annotation.**
 
 Modular, reproducible pipeline that turns a public NCBI SRA RunTable into a
-per-gene expression matrix (TPM and FPKM) from a single entry point. It works
-for **any organism** that has a reference genome (FASTA) and annotation (GTF):
-the target species are declared in a config file, not hardcoded in the code.
+per-gene expression matrix (TPM and FPKM) from a single entry point. Target
+organisms are declared in a config file — nothing about the species is
+hardcoded, and adding one requires no code change.
 
-The repository ships preconfigured for a set of Lepidoptera species (used as the
-worked example throughout this document), but nothing in the pipeline is tied to
-that taxon — see [Adapting to another organism](#adapting-to-another-organism).
+*Helicoverpa armigera* ships as the reference example: it is the species in
+`config/species.sh`, the dataset behind `run.sh --example`, and the organism
+used in the tests. Any other organism with a genome FASTA and a GTF works the
+same way — see [Adding an organism](#adding-an-organism).
 
 **Institution:** Universidad de Nariño
 **PI:** Juan Sebastián Zambrano
@@ -21,30 +24,136 @@ prefetch → fastq-dump/fasterq-dump → FastQC (raw) → BBDuk
 → FastQC (clean) → MultiQC → STAR → RSEM → expression + QC matrices
 ```
 
-| Stage        | Tool        | Output                                    |
-|:-------------|:------------|:------------------------------------------|
-| Download     | SRA-Toolkit | `.sra` → FASTQ                            |
-| Quality      | FastQC      | Per-sample QC (before and after trimming) |
-| Trimming     | BBDuk       | Quality-trimmed FASTQ                     |
-| Alignment    | STAR        | Genome BAM + transcriptome BAM            |
-| Quantification | RSEM      | `genes.results` / `isoforms.results`      |
-| Aggregation  | Python      | Expression matrix + STAR/BBDuk QC matrices|
+| Stage          | Tool        | Output                                    |
+|:---------------|:------------|:------------------------------------------|
+| Download       | SRA-Toolkit | `.sra` → FASTQ                            |
+| Quality        | FastQC      | Per-sample QC (before and after trimming) |
+| Trimming       | BBDuk       | Quality-trimmed FASTQ                     |
+| Alignment      | STAR        | Genome BAM + transcriptome BAM            |
+| Quantification | RSEM        | `genes.results` / `isoforms.results`      |
+| Aggregation    | Python      | Expression matrix + STAR/BBDuk QC matrices|
 
 ---
 
-## Preconfigured species
+## Quick start
 
-These are the entries shipped in `config/species.sh`. The `active` flag selects
-which ones a run processes; toggling it (or adding/removing species) requires no
-code changes — use `setup.sh` or edit the file directly.
+```bash
+conda env create -f environment.yml
+conda activate omniquant-seq
 
-| Species                  | Key in pipeline          | Active by default |
-|:-------------------------|:-------------------------|:------------------|
-| *Helicoverpa armigera*   | `Helicoverpa_armigera`   | yes               |
-| *Spodoptera frugiperda*  | `Spodoptera_frugiperda`  | yes               |
-| *Plutella xylostella*    | `Plutella_xylostella`    | yes               |
-| *Bombyx mori*            | `Bombyx_mori`            | no                |
-| *Diatraea saccharalis*   | `Diatraea_saccharalis`   | no                |
+# See every mode and what it does
+bash pipeline/run.sh --help
+
+# Small self-contained demo (Helicoverpa armigera, 1 run, 25k reads)
+bash pipeline/run.sh --example
+```
+
+For your own dataset:
+
+```bash
+# 1. Configure compute resources and species (interactive)
+bash pipeline/setup.sh
+
+#    ...or add a single organism, genome download included:
+bash pipeline/setup.sh --add-species
+
+#    ...or edit the two config files directly:
+#    config/pipeline.sh — thread counts, paths, run flags
+#    config/species.sh  — species keys + genome/GTF URLs, active flag
+
+# 2. Build references once per active species
+bash pipeline/run.sh --build-refs
+
+# 3. Smoke test on your samples (limited reads)
+bash pipeline/run.sh --test
+
+# 4. Full production run
+bash pipeline/run.sh --full
+```
+
+Run from the **project root** — the directory holding your SRA RunTable.
+Outputs are written under `pipeline/results/` and `pipeline/logs/`.
+
+---
+
+## CLI
+
+### `run.sh`
+
+| Mode | What it does |
+|:--|:--|
+| `--build-refs` | Downloads the genome + annotation of every active species and builds the STAR and RSEM indexes, then exits. Run once per species; safe to re-run. Does **not** need a RunTable. |
+| `--test` | Full pipeline over every sample, limited to `TEST_READS` reads each. |
+| `--full` | Full pipeline over all reads. Production run. |
+| `--example` | Self-contained demo, see below. |
+| `-h`, `--help` | Usage, current defaults, and output locations. |
+
+### `setup.sh`
+
+| Mode | What it does |
+|:--|:--|
+| *(none)* | Compute resources, then the species menu. |
+| `--resources` | Compute resources only (threads, RAM, storage). |
+| `--species` | Species menu only: toggle, delete, add entries. |
+| `--add-species` | Add or update **one** species and fetch its reference files. |
+| `-h`, `--help` | Usage. |
+
+`--add-species` prompts for three values:
+
+```
+  Insert the name of the species (e.g. Helicoverpa_armigera): Danio_rerio
+  Genome FASTA URL (.fna.gz): https://ftp.ncbi.nlm.nih.gov/.../GCF_..._genomic.fna.gz
+  Annotation GTF URL (.gtf.gz): https://ftp.ncbi.nlm.nih.gov/.../GCF_..._genomic.gtf.gz
+```
+
+and then
+
+1. writes (or updates) the entry in `config/species.sh` as
+   `"species_key|genome_fna_gz_url|genome_gtf_gz_url|active"`;
+2. creates `references/<species_key>/`;
+3. downloads and decompresses both files into
+   `references/<species_key>/genome.fa` and `.../genes.gtf`, the layout STAR
+   and RSEM expect.
+
+On success it prints the species, both file paths, and the command to build the
+indexes. On failure it says which step failed, keeps the config entry so the
+URLs can be corrected, and exits non-zero.
+
+---
+
+## The `--example` run
+
+```bash
+bash pipeline/run.sh --example
+```
+
+A complete, small run that exercises every stage, meant to show the flow
+before committing to a real dataset.
+
+| | |
+|:--|:--|
+| **Dataset** | `examples/SraRunTable.example.csv` — one paired-end *Helicoverpa armigera* run, `SRR29271587` ([PRJNA1119665](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1119665)) |
+| **Species** | Forced to `Helicoverpa_armigera`, whatever `config/species.sh` has active |
+| **Reads** | 25,000 spots (`fastq-dump -X`) |
+| **Stages** | All of them: prefetch → fastq-dump → FastQC → BBDuk → FastQC → MultiQC → STAR → RSEM → matrices |
+| **Cleanup** | Disabled — SRA, raw FASTQ and trimmed FASTQ are kept so each stage is inspectable |
+
+What to expect afterwards:
+
+```
+pipeline/results/tables/gene_expression_matrix.tsv        TPM + FPKM columns for SRR29271587
+pipeline/results/tables/STAR_mapping_QC_matrix.tsv        STAR Log.final.out metrics
+pipeline/results/tables/BBDUK_preprocessing_QC_matrix.tsv BBDuk trimming stats
+pipeline/results/rsem/Helicoverpa_armigera/               RSEM gene- and isoform-level results
+pipeline/results/qc/multiqc/                              per-sample and global MultiQC reports
+pipeline/results/pipeline_sample_summary.tsv              one row, all stages OK
+pipeline/logs/SRR29271587.log                             per-stage log for the sample
+```
+
+> **Cost.** The example reads 25k spots but `prefetch` still downloads the
+> whole ~620 MB SRA archive, and the *H. armigera* STAR/RSEM index is built
+> first if missing (~10 GB, tens of minutes). It is a small run, not an
+> instant one.
 
 ---
 
@@ -52,18 +161,19 @@ code changes — use `setup.sh` or edit the file directly.
 
 ```
 pipeline/
-├── run.sh                          # Single entry point — orchestrates all steps
+├── run.sh                          # Entry point — parses the CLI, delegates to the modules
 ├── setup.sh                        # Interactive configurator (resources + species)
 ├── config/
 │   ├── pipeline.sh                 # Compute resources, paths, flags, retry settings
 │   └── species.sh                  # SPECIES_CONFIG[]: genome + GTF URLs per species
 ├── lib/
-│   ├── utils.sh                    # log_step, check_tools, disk_usage, require_file/dir
+│   ├── utils.sh                    # die, log_step, check_tools, disk_usage, downloads
+│   ├── species_config.sh           # Read/modify/write config/species.sh
 │   ├── cleanup.sh                  # Per-step intermediate file deletion
 │   └── sample_tracker.sh           # Atomic per-sample status TSV
 ├── steps/
-│   ├── validate_inputs.sh          # detect_inputs() — validates FASTA + GTF + RunTable
-│   ├── build_references.sh         # STAR genomeGenerate + rsem-prepare-reference
+│   ├── validate_inputs.sh          # Locates the RunTable and any local genome override
+│   ├── build_references.sh         # Fetch genome/GTF, STAR genomeGenerate, rsem-prepare-reference
 │   ├── parse_samples.sh            # Calls helpers/parse_runtable.py → samples.tsv
 │   ├── prefetch.sh                 # SRA download with retry loop
 │   ├── fastq_dump.sh               # SRA → FASTQ (fastq-dump test / fasterq-dump full)
@@ -71,23 +181,34 @@ pipeline/
 │   ├── trim.sh                     # BBDuk quality + adapter trimming
 │   ├── align.sh                    # STAR alignment (ENCODE flags) → BAM
 │   ├── quantify.sh                 # RSEM quantification → genes.results
+│   ├── process_sample.sh           # Per-sample stage order, failure handling, retry passes
 │   └── postprocess.sh              # Expression matrix + QC matrices + global MultiQC
 ├── helpers/
 │   ├── parse_runtable.py           # Parse SRA RunTable (CSV or XLSX) → samples.tsv
 │   └── build_matrix.py             # Build expression matrix and QC matrices from results
+├── examples/
+│   └── SraRunTable.example.csv     # Dataset used by run.sh --example
 └── tests/
-    └── test_pipeline.sh            # 24 unit tests (no external tools required)
+    └── test_pipeline.sh            # 49 unit tests (no external tools, no network)
 ```
+
+**Separation of responsibilities.** `run.sh` parses flags, sources the modules
+and calls four things in order: `build_all_references`, `parse_samples`,
+`run_sample_loop`, `postprocess_all`. Every `steps/*.sh` file owns one stage
+and exposes one `step_*` function; `steps/process_sample.sh` owns the order in
+which they run and what happens when one fails. Cross-cutting concerns —
+logging, aborts, downloads, disk accounting, cleanup, sample tracking — live in
+`lib/` and are never re-implemented inside a step.
 
 ---
 
 ## Software requirements
 
-All tools are pinned in `environment.yml` at the repository root. Install with:
+All tools are pinned in `environment.yml`:
 
 ```bash
 conda env create -f environment.yml
-conda activate lepidoptera-rnaseq
+conda activate omniquant-seq
 ```
 
 | Tool        | Version   | Role                                        |
@@ -95,37 +216,13 @@ conda activate lepidoptera-rnaseq
 | SRA-Toolkit | 3.0.0     | `prefetch`, `fasterq-dump` (SRA download)   |
 | FastQC      | 0.12.1    | Per-sample quality control                  |
 | MultiQC     | 1.14      | Per-sample and global aggregated QC report  |
-| BBDuk (BBMap) | unpinned| Adapter removal, quality trimming           |
+| BBDuk (BBMap) | 39.81   | Adapter removal, quality trimming           |
 | STAR        | 2.7.10a   | Splice-aware alignment (ENCODE protocol)    |
 | RSEM        | 1.3.3     | TPM/FPKM quantification from BAM            |
 | Python      | ≥ 3.9     | `helpers/parse_runtable.py`, `build_matrix.py` |
 | openpyxl    | ≥ 3.0     | SRA RunTable parsing from `.xlsx`           |
 
----
-
-## Quick start
-
-```bash
-# 1. Configure resources and species (interactive)
-bash pipeline/setup.sh
-
-#    ...or edit the two config files directly:
-#    config/pipeline.sh — thread counts, storage paths, run flags
-#    config/species.sh  — species keys + genome/GTF URLs, active flag
-
-# 2. Build references once per active species
-bash pipeline/run.sh --build-refs
-
-# 3. Smoke test (limited reads per sample)
-bash pipeline/run.sh --test
-
-# 4. Full production run
-bash pipeline/run.sh --full
-```
-
-Run from the **project root** (the directory that contains the genome FASTA,
-GTF, and SRA RunTable, when using local inputs). Outputs are written under
-`pipeline/results/` and `pipeline/logs/`.
+`curl` or `wget` is used for reference downloads, whichever is available.
 
 ---
 
@@ -133,11 +230,10 @@ GTF, and SRA RunTable, when using local inputs). Outputs are written under
 
 ### Step 0 — Configure compute resources
 
-Run `bash pipeline/setup.sh`, or edit `config/pipeline.sh` directly. The
-defaults are conservative:
+Run `bash pipeline/setup.sh --resources`, or edit `config/pipeline.sh`
+directly. The defaults are conservative:
 
 ```bash
-# config/pipeline.sh (defaults)
 THREADS_DOWNLOAD=8
 THREADS_FASTQC=8
 THREADS_TRIM=8
@@ -163,32 +259,39 @@ Key run flags:
 bash pipeline/run.sh --build-refs
 ```
 
-For each species with `active=true` in `config/species.sh`, the pipeline:
+For each species with `active=true` in `config/species.sh`:
 
-1. Uses a local genome FASTA and GTF if present, otherwise downloads them from
-   the URLs in `SPECIES_CONFIG`.
-2. Decompresses both files into `references/<species>/`.
+1. Downloads the genome FASTA and GTF from the URLs in `SPECIES_CONFIG`, or
+   reuses the local files described below.
+2. Decompresses both into `references/<species_key>/`.
 3. Builds the STAR genome index (`STAR --runMode genomeGenerate`).
 4. Prepares the RSEM reference (`rsem-prepare-reference`).
 
-Skips any species whose index already exists. Safe to re-run.
+Species whose indexes already exist are skipped, so this is safe to re-run.
+Both STAR and RSEM outputs are verified before the species is marked done.
+
+**Local genome override.** A `*.fna.gz` plus a `*.gtf.gz` in the project root
+is used in place of the download URLs — but only when exactly **one** species
+is active, since a single pair of files cannot be assigned to several
+organisms. With more than one active species the local files are ignored, with
+a warning, and each genome is downloaded from its own URL. Files you supply are
+never deleted.
 
 > **Index size** depends on genome size (typically several GB per species). The
-> genome FASTA and GTF are retained under `references/<species>/` for potential
+> genome FASTA and GTF are kept under `references/<species_key>/` for
 > re-indexing.
 
-### Step 2 — Prepare the sample list *(automatic on first run)*
+### Step 2 — Prepare the sample list *(automatic)*
 
-`parse_samples.sh` calls `helpers/parse_runtable.py` automatically when
-`run.sh` starts, passing the active species from `config/species.sh` so that
-only organisms you have references for reach `samples.tsv`. To run it in
-isolation:
+`parse_samples.sh` calls `helpers/parse_runtable.py` when `run.sh` starts,
+passing the active species from `config/species.sh` so that only organisms you
+have references for reach `samples.tsv`. To run it in isolation:
 
 ```bash
 python3 pipeline/helpers/parse_runtable.py \
     --input   SraRunTable.csv \
     --output  samples.tsv \
-    --species Helicoverpa_armigera,Spodoptera_frugiperda
+    --species Helicoverpa_armigera
 ```
 
 Accepts `.csv` or `.xlsx`. The parser:
@@ -214,7 +317,7 @@ bash pipeline/run.sh --test    # fast validation with limited reads
 bash pipeline/run.sh --full    # full production run
 ```
 
-Per-sample steps for each `SRR` in `samples.tsv`:
+Per-sample steps for each accession in `samples.tsv`:
 
 ```
 prefetch → fastq-dump/fasterq-dump → FastQC (raw) → BBDuk
@@ -222,15 +325,17 @@ prefetch → fastq-dump/fasterq-dump → FastQC (raw) → BBDuk
 ```
 
 The loop is **idempotent**: completed samples are skipped based on the
-`pipeline_sample_summary.tsv` tracker, not just the presence of output files.
-Interrupted runs resume from the last incomplete sample.
+`pipeline_sample_summary.tsv` tracker, not just on the presence of output
+files, so an interrupted run resumes from the last incomplete sample.
 
-**Retry logic:** if a sample fails, it is retried on the next pass (up to
-`PIPELINE_RETRY_PASSES` complete passes over `samples.tsv`).
+**Retry logic:** a failed sample is retried on the next pass, up to
+`PIPELINE_RETRY_PASSES` complete passes over `samples.tsv`. A sample that stops
+early records the stage that failed (`FAILED`) and `NA` for the stages that
+never ran.
 
 ### Step 4 — Post-processing *(automatic at end of run)*
 
-`postprocess_all` runs automatically after the sample loop. To run it manually:
+`postprocess_all` runs after the sample loop. To run it manually:
 
 ```bash
 python3 pipeline/helpers/build_matrix.py \
@@ -244,35 +349,78 @@ python3 pipeline/helpers/build_matrix.py \
 
 ---
 
-## Adapting to another organism
+## Adding an organism
 
-The pipeline is not tied to Lepidoptera. To process a different taxon:
+Nothing in the pipeline is tied to a taxon. To process a different organism:
 
-1. **Declare the species.** Run `bash pipeline/setup.sh` and add an entry, or
-   edit `config/species.sh` directly. Each entry is:
+1. **Declare the species.** Easiest path:
+
+   ```bash
+   bash pipeline/setup.sh --add-species
+   ```
+
+   or add the entry to `config/species.sh` by hand:
 
    ```
    "species_key|genome_fna_gz_url|genome_gtf_gz_url|active"
    ```
 
-   - `species_key` is `Genus_species` (underscore-separated) and must match the
-     subdirectory name under `references/`.
-   - The FASTA and GTF URLs point to gzip-compressed NCBI files (`.fna.gz`,
-     `.gtf.gz`). A local FASTA/GTF in the project root is used if present.
+   - `species_key` is `Genus_species` (underscore-separated) and names the
+     subdirectory under `references/`.
+   - Both URLs must point to gzip-compressed NCBI files (`.fna.gz`, `.gtf.gz`).
 
-2. **Match the RunTable.** `parse_runtable.py` derives the same `Genus_species`
-   key from the RunTable's `Organism` column automatically, so as long as the
-   `species_key` equals the scientific name with an underscore, samples are
-   routed correctly. No Python editing is required.
+2. **Match the RunTable.** `parse_runtable.py` derives the same
+   `Genus_species` key from the RunTable's `Organism` column, so samples are
+   routed automatically as long as `species_key` equals the scientific name
+   with an underscore. No Python editing.
 
 3. **Handle missing organism metadata.** For single-species datasets, or when
-   the `Organism` field is empty or ambiguous, set `SPECIES_FALLBACK` in
+   `Organism` is empty or ambiguous, set `SPECIES_FALLBACK` in
    `config/pipeline.sh` (or pass `--fallback Genus_species`).
 
 4. **Tune organism-specific parameters.** In particular `STAR_OVERHANG`
    (`read length − 1`) and `STAR_SA_INDEX_NBASES`
    (`min(14, log2(genome length)/2 − 1)` for small genomes). See
    [Configuration reference](#configuration-reference).
+
+5. **Build the indexes:** `bash pipeline/run.sh --build-refs`.
+
+### Additional species examples
+
+Ready-to-paste entries for other organisms. Append any of them to
+`SPECIES_CONFIG` in `config/species.sh`, or feed the two URLs to
+`setup.sh --add-species`.
+
+<details>
+<summary>Lepidoptera (the pipeline's original use case)</summary>
+
+```bash
+"Spodoptera_frugiperda|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/023/101/765/GCF_023101765.2_AGI-APGP_CSIRO_Sfru_2.0/GCF_023101765.2_AGI-APGP_CSIRO_Sfru_2.0_genomic.fna.gz|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/023/101/765/GCF_023101765.2_AGI-APGP_CSIRO_Sfru_2.0/GCF_023101765.2_AGI-APGP_CSIRO_Sfru_2.0_genomic.gtf.gz|\
+true"
+
+"Plutella_xylostella|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/932/276/165/GCF_932276165.2_ilPluXylo3.2/GCF_932276165.2_ilPluXylo3.2_genomic.fna.gz|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/932/276/165/GCF_932276165.2_ilPluXylo3.2/GCF_932276165.2_ilPluXylo3.2_genomic.gtf.gz|\
+true"
+
+"Bombyx_mori|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/030/269/925/GCF_030269925.1_ASM3026992v2/GCF_030269925.1_ASM3026992v2_genomic.fna.gz|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/030/269/925/GCF_030269925.1_ASM3026992v2/GCF_030269925.1_ASM3026992v2_genomic.gtf.gz|\
+true"
+
+"Diatraea_saccharalis|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/918/026/875/GCA_918026875.4_PGI_DIATSA_v4/GCA_918026875.4_PGI_DIATSA_v4_genomic.fna.gz|\
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/918/026/875/GCA_918026875.4_PGI_DIATSA_v4/GCA_918026875.4_PGI_DIATSA_v4_genomic.gtf.gz|\
+true"
+```
+
+</details>
+
+Genome and annotation URLs for any other organism come from the same place:
+the NCBI Genomes FTP directory of the assembly you want, taking the
+`*_genomic.fna.gz` and `*_genomic.gtf.gz` files.
 
 ---
 
@@ -281,7 +429,7 @@ The pipeline is not tied to Lepidoptera. To process a different taxon:
 ```
 pipeline/results/
 ├── rsem/
-│   └── <species>/
+│   └── <species_key>/
 │       ├── <SRR>.genes.results       # TPM, FPKM, expected_count (gene level)
 │       └── <SRR>.isoforms.results    # TPM, FPKM, expected_count (isoform level)
 ├── qc/
@@ -297,18 +445,18 @@ pipeline/results/
 
 pipeline/logs/
 ├── <SRR>.log                         # Per-sample cumulative log (all steps)
-├── <SRR>_prefetch.log
+├── <SRR>_prefetch_<n>.log
 ├── <SRR>_bbduk.log
 ├── <SRR>_star.log
 ├── <SRR>_STAR_Log.final.out
 └── <SRR>_rsem.log
 
-fastqc_out/                           # FastQC HTML + ZIP (working dir at project root)
+fastqc_out/                           # FastQC HTML + ZIP (project root)
 ```
 
-`run.sh` also creates the working directories `sra/`, `fastq/`, and
-`clean_fastq/` at the project root for intermediate data; these are emptied by
-the cleanup steps as each sample completes.
+`run.sh` also creates `sra/`, `fastq/` and `clean_fastq/` at the project root
+for intermediate data; these are emptied by the cleanup steps as each sample
+completes.
 
 `gene_expression_matrix.tsv` contains all samples as columns and only genes
 present in every sample (inner join). Its leading `expected_count` and
@@ -320,8 +468,8 @@ counts use the individual `genes.results` files.
 
 ## Sample tracker
 
-`pipeline_sample_summary.tsv` records the status of each pipeline stage per
-sample. Columns (as written by `lib/sample_tracker.sh`):
+`pipeline_sample_summary.tsv` records the status of each stage per sample.
+Columns (as written by `lib/sample_tracker.sh`):
 
 | Column | Values |
 |:-------|:-------|
@@ -330,15 +478,16 @@ sample. Columns (as written by `lib/sample_tracker.sh`):
 | `layout` | `PAIRED` or `SINGLE` |
 | `test_mode` | `true` or `false` |
 | `test_reads` | Number of reads in test mode |
-| `prefetch_status` | `OK`, `FAILED`, `PENDING` |
-| `fastq_status` | `OK`, `FAILED`, `PENDING` |
-| `trimming_status` | `OK`, `FAILED`, `PENDING` |
-| `star_status` | `OK`, `FAILED`, `PENDING` |
-| `rsem_status` | `OK`, `FAILED`, `PENDING` |
-| `genes_results` | Absolute path or `NA` |
+| `prefetch_status` | `OK`, `FAILED`, `NA` |
+| `fastq_status` | `OK`, `FAILED`, `NA` |
+| `trimming_status` | `OK`, `FAILED`, `NA` |
+| `star_status` | `OK`, `FAILED`, `NA` |
+| `rsem_status` | `OK`, `FAILED`, `NA` |
+| `genes_results` | Path to the RSEM gene table, or `NA` |
 
-Updates are written atomically (`awk > tmp && mv tmp real`) to prevent
-corruption on interrupted runs.
+`NA` means the stage never ran because an earlier one failed. Updates are
+written atomically (`awk > tmp && mv tmp real`) so an interrupted run cannot
+corrupt the file.
 
 ---
 
@@ -363,14 +512,15 @@ CLEAN_RAW_FASTQ_AFTER_RSEM=true
 CLEAN_FASTQ_AFTER_RSEM=true
 ```
 
-Set any flag to `false` to retain intermediate files for debugging.
+Set any flag to `false` to retain intermediate files for debugging. `--example`
+sets all three to `false` automatically.
 
-> `cleanup_on_error` is defined in `lib/cleanup.sh` but is **not** currently
-> wired into `run.sh`: partial outputs from a failed sample are left in place
-> for inspection rather than deleted automatically.
+> `cleanup_on_error` is defined in `lib/cleanup.sh` but is **not** wired into
+> the sample loop: partial outputs from a failed sample are left in place for
+> inspection rather than deleted automatically.
 
-`disk_usage` in `lib/utils.sh` logs free space before each heavy step and
-emits a non-fatal warning when available space drops below `DISK_WARN_GB`.
+`disk_usage` in `lib/utils.sh` logs free space before each heavy step and warns
+(non-fatally) when it drops below `DISK_WARN_GB`.
 
 ---
 
@@ -380,21 +530,26 @@ emits a non-fatal warning when available space drops below `DISK_WARN_GB`.
 bash pipeline/tests/test_pipeline.sh
 ```
 
-24 unit tests covering:
+49 unit tests, no bioinformatics tool and no network access required:
 
-- `normalize_layout` — 8 input variants (PE, SE, Paired-End, etc.)
-- `require_file` — missing file abort, existing file pass
-- `detect_inputs` — happy path, two-FASTA abort
-- `parse_runtable.py` — row count, SRR value, layout, species-key derivation,
-  generic (non-Lepidoptera) organism, `--species` filtering, `--fallback`
-- `parse_samples` — restriction to active `SPECIES_CONFIG` species
-
-No external bioinformatics tools required. All tests complete in under 2 seconds.
+- `normalize_layout` — 8 input variants (PE, SE, Paired-End, …)
+- `require_file` — missing file aborts, existing file passes
+- `species_config` — entry splitting, active-key filtering, upsert
+  (add vs. update), save/load round-trip, index lookup
+- `detect_inputs` — RunTable detection, local genome override with one active
+  species, override *ignored* with several, ambiguous RunTable aborts,
+  references optional
+- `parse_runtable.py` — row count, accession, layout, species-key derivation,
+  non-example organism, `--species` filtering, `--fallback`
+- `examples/SraRunTable.example.csv` — parses to exactly one usable sample
+- `parse_samples` — restriction to the active `SPECIES_CONFIG` species
+- CLI — `run.sh --help` documents every mode, both scripts reject unknown flags
+- `bash -n` over every shell script in the repository
 
 Expected output:
 
 ```
-Results: 24 passed, 0 failed.
+Results: 49 passed, 0 failed.
 ```
 
 ---
@@ -418,7 +573,7 @@ Results: 24 passed, 0 failed.
 | `TEST_READS` | `100000` | Reads per sample in test mode |
 | `PREFETCH_RETRIES` | `5` | Download retry attempts |
 | `PREFETCH_RETRY_SLEEP` | `30` | Seconds between retry attempts |
-| `PIPELINE_RETRY_PASSES` | `3` | Full retry passes over sample list |
+| `PIPELINE_RETRY_PASSES` | `3` | Full retry passes over the sample list |
 | `STAR_OVERHANG` | `99` | `sjdbOverhang` (read length − 1) |
 | `STAR_SA_INDEX_NBASES` | `12` | `genomeSAindexNbases` (reduce for small genomes) |
 | `BBDUK_QTRIM` | `rl` | Quality trimming direction |
@@ -426,15 +581,18 @@ Results: 24 passed, 0 failed.
 | `BBDUK_MINLEN` | `36` | Minimum read length after trimming |
 | `BBDUK_REF` | `""` | Adapter FASTA — empty disables adapter clipping |
 
+STAR alignment flags follow the ENCODE long-RNA-seq protocol and are collected
+in one array at the top of `steps/align.sh`.
+
 ### `config/species.sh`
 
-Each entry in `SPECIES_CONFIG` follows the format:
+Each entry in `SPECIES_CONFIG`:
 
 ```
 "species_key|genome_fna_gz_url|genome_gtf_gz_url|active"
 ```
 
-- `species_key` must match the subdirectory name under `references/` and the
+- `species_key` names the subdirectory under `references/` and must equal the
   `Genus_species` key derived from the RunTable `Organism` field.
 - Set `active=false` to skip a species without removing its entry.
 - URLs must point to gzip-compressed files (`.fna.gz`, `.gtf.gz`).

@@ -83,8 +83,8 @@ def main() -> None:
     p.add_argument("--fallback", "-f", default=None,
                    help="Species key for rows with an empty/unresolvable Organism field.")
     p.add_argument("--species",  "-s", default=None,
-                   help="Comma-separated species keys to keep (e.g. "
-                        "'Helicoverpa_armigera,Bombyx_mori'). Others are dropped. "
+                   help="Comma-separated Genus_species keys to keep (e.g. "
+                        "'Helicoverpa_armigera,Danio_rerio'). Others are dropped. "
                         "Omit to keep every organism found.")
     args = p.parse_args()
 

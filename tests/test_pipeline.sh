@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Minimal unit tests — no external tools required.
+# Unit tests for the pure-bash and Python layers.
+# No bioinformatics tool and no network access is required.
+#
+#   bash pipeline/tests/test_pipeline.sh
 set -euo pipefail
 
 PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-LOG_DIR="/tmp/pipeline_test_logs"
+LOG_DIR="$(mktemp -d)"
 DISK_WARN_GB=5
-mkdir -p "$LOG_DIR"
+REFERENCES_DIR="${LOG_DIR}/references"
+trap 'rm -rf "$LOG_DIR"' EXIT
 
 source "${PIPELINE_DIR}/lib/utils.sh"
+source "${PIPELINE_DIR}/lib/species_config.sh"
 source "${PIPELINE_DIR}/steps/validate_inputs.sh"
+source "${PIPELINE_DIR}/steps/parse_samples.sh"
 
 _pass=0
 _fail=0
@@ -28,7 +34,7 @@ assert_eq() {
 # A function that calls exit 1 must run in a subshell so it can't kill the test.
 assert_fails() {
     local desc="$1"; shift
-    if ! ( "$@" 2>/dev/null ); then
+    if ! ( "$@" >/dev/null 2>&1 ); then
         echo "PASS: ${desc} (expected failure)"
         (( ++_pass ))
     else
@@ -37,13 +43,24 @@ assert_fails() {
     fi
 }
 
+assert_succeeds() {
+    local desc="$1"; shift
+    if ( "$@" >/dev/null 2>&1 ); then
+        echo "PASS: ${desc}"
+        (( ++_pass ))
+    else
+        echo "FAIL: ${desc} (expected success, but failed)"
+        (( ++_fail )) || true
+    fi
+}
+
 # --- normalize_layout --------------------------------------------------------
-assert_eq "PAIRED literal"    "$(normalize_layout PAIRED)"    "PAIRED"
-assert_eq "paired lowercase"  "$(normalize_layout paired)"    "PAIRED"
-assert_eq "PE"                "$(normalize_layout PE)"        "PAIRED"
+assert_eq "PAIRED literal"    "$(normalize_layout PAIRED)"     "PAIRED"
+assert_eq "paired lowercase"  "$(normalize_layout paired)"     "PAIRED"
+assert_eq "PE"                "$(normalize_layout PE)"         "PAIRED"
 assert_eq "Paired-End"        "$(normalize_layout Paired-End)" "PAIRED"
-assert_eq "SINGLE literal"    "$(normalize_layout SINGLE)"    "SINGLE"
-assert_eq "SE"                "$(normalize_layout SE)"        "SINGLE"
+assert_eq "SINGLE literal"    "$(normalize_layout SINGLE)"     "SINGLE"
+assert_eq "SE"                "$(normalize_layout SE)"         "SINGLE"
 assert_eq "Single-End"        "$(normalize_layout Single-End)" "SINGLE"
 assert_fails "unknown layout" normalize_layout UNKNOWN
 
@@ -54,18 +71,72 @@ tmpf="$(mktemp)"
 assert_eq "require_file exists" "$(require_file "$tmpf" "" && echo ok)" "ok"
 rm -f "$tmpf"
 
-# --- detect_inputs -----------------------------------------------------------
-tmpd="$(mktemp -d)"
-touch "${tmpd}/genome.fna.gz" "${tmpd}/annotation.gtf.gz" "${tmpd}/SraRunTable.csv"
-detect_inputs "$tmpd"
-assert_eq "FNA_FILE set"   "$FNA_FILE"   "${tmpd}/genome.fna.gz"
-assert_eq "GTF_FILE set"   "$GTF_FILE"   "${tmpd}/annotation.gtf.gz"
-assert_eq "RUN_TABLE set"  "$RUN_TABLE"  "${tmpd}/SraRunTable.csv"
+# --- species_config ----------------------------------------------------------
+# Entries are written with backslash continuations; splitting must strip them.
+species_entry_split "Genus_species|\
+http://example.org/g.fna.gz|\
+http://example.org/g.gtf.gz|\
+true" sc_key sc_fna sc_gtf sc_active
+assert_eq "species_entry_split: key"    "$sc_key"    "Genus_species"
+assert_eq "species_entry_split: fna"    "$sc_fna"    "http://example.org/g.fna.gz"
+assert_eq "species_entry_split: active" "$sc_active" "true"
 
-# Two FASTA files should abort
-touch "${tmpd}/extra.fa.gz"
-assert_fails "detect_inputs two FASTAs" detect_inputs "$tmpd"
+SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" "Danio_rerio|f|g|false" )
+assert_eq "species_config_active_keys: only active" \
+    "$(species_config_active_keys | paste -sd, -)" "Helicoverpa_armigera"
+
+tmpd="$(mktemp -d)"
+SP_KEYS=(); SP_FNA=(); SP_GTF=(); SP_ACTIVE=()
+species_config_upsert Danio_rerio a.fna.gz a.gtf.gz true
+assert_eq "species_config_upsert: new entry" "$SPECIES_CONFIG_LAST_ACTION" "added"
+species_config_upsert Danio_rerio b.fna.gz b.gtf.gz false
+assert_eq "species_config_upsert: existing entry" "$SPECIES_CONFIG_LAST_ACTION" "updated"
+assert_eq "species_config_upsert: no duplicate row" "${#SP_KEYS[@]}" "1"
+assert_eq "species_config_upsert: value replaced"   "${SP_FNA[0]}"   "b.fna.gz"
+
+# Round-trip: what save writes, load must read back identically.
+species_config_save "${tmpd}/species.sh"
+SP_KEYS=(); SP_FNA=(); SP_GTF=(); SP_ACTIVE=()
+species_config_load "${tmpd}/species.sh"
+assert_eq "species_config save/load: key"    "${SP_KEYS[0]}"   "Danio_rerio"
+assert_eq "species_config save/load: gtf"    "${SP_GTF[0]}"    "b.gtf.gz"
+assert_eq "species_config save/load: active" "${SP_ACTIVE[0]}" "false"
+assert_eq "species_config_index: absent key" "$(species_config_index Nope)" "-1"
 rm -rf "$tmpd"
+
+# --- detect_inputs -----------------------------------------------------------
+# One active species: a local FASTA + GTF override the download URLs.
+tmpd="$(mktemp -d)"
+SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
+touch "${tmpd}/genome.fna.gz" "${tmpd}/annotation.gtf.gz" "${tmpd}/SraRunTable.csv"
+RUN_TABLE=""
+detect_inputs "$tmpd" >/dev/null
+assert_eq "detect_inputs: RUN_TABLE set" "$RUN_TABLE" "${tmpd}/SraRunTable.csv"
+assert_eq "detect_inputs: FNA_FILE set"  "$FNA_FILE"  "${tmpd}/genome.fna.gz"
+assert_eq "detect_inputs: GTF_FILE set"  "$GTF_FILE"  "${tmpd}/annotation.gtf.gz"
+
+# Two active species: a single local genome cannot be assigned, so it is ignored
+# rather than silently used for every organism.
+SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" "Danio_rerio|f|g|true" )
+RUN_TABLE=""
+detect_inputs "$tmpd" >/dev/null
+assert_eq "detect_inputs: local genome ignored for multi-species" "$FNA_FILE" ""
+
+# A second RunTable is ambiguous and must abort.
+SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
+touch "${tmpd}/other_RunTable.csv"
+RUN_TABLE=""
+assert_fails "detect_inputs: two RunTables abort" detect_inputs "$tmpd"
+rm -rf "$tmpd"
+
+# References are optional — a RunTable alone is a valid input set.
+tmpd="$(mktemp -d)"
+touch "${tmpd}/SraRunTable.csv"
+RUN_TABLE=""
+detect_inputs "$tmpd" >/dev/null
+assert_eq "detect_inputs: no local genome needed" "$FNA_FILE" ""
+rm -rf "$tmpd"
+unset RUN_TABLE
 
 # --- parse_runtable.py -------------------------------------------------------
 tmpd="$(mktemp -d)"
@@ -77,7 +148,7 @@ CSV
 
 python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
     --input  "${tmpd}/SraRunTable.csv" \
-    --output "${tmpd}/samples.tsv"
+    --output "${tmpd}/samples.tsv" >/dev/null
 
 rows="$(awk 'NR>1' "${tmpd}/samples.tsv" | wc -l | tr -d ' ')"
 assert_eq "parse_runtable: 1 RNA-Seq row"  "$rows"  "1"
@@ -92,7 +163,6 @@ got_species="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/samples.tsv")"
 assert_eq "parse_runtable: species key from Organism" "$got_species" "Helicoverpa_armigera"
 rm -rf "$tmpd"
 
-# --- parse_runtable.py: generic organism (no hardcoded species list) ---------
 # Any organism must resolve to a Genus_species key derived from the Organism
 # field, so the pipeline is not tied to a fixed taxon.
 tmpd="$(mktemp -d)"
@@ -108,12 +178,12 @@ got_generic="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/generic.tsv" 2>/dev/null ||
 assert_eq "parse_runtable: derives key for any organism" "$got_generic" "Danio_rerio"
 rm -rf "$tmpd"
 
-# --- parse_runtable.py: --species restricts to configured species ------------
+# --species restricts the output to the configured species.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/multi.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
 SRR300001,RNA-Seq,TRANSCRIPTOMIC,PAIRED,Helicoverpa armigera
-SRR300002,RNA-Seq,TRANSCRIPTOMIC,SINGLE,Bombyx mori
+SRR300002,RNA-Seq,TRANSCRIPTOMIC,SINGLE,Danio rerio
 CSV
 
 python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
@@ -127,7 +197,7 @@ multi_sp="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/multi.tsv" 2>/dev/null || true
 assert_eq "parse_runtable: --species kept the right species" "$multi_sp" "Helicoverpa_armigera"
 rm -rf "$tmpd"
 
-# --- parse_runtable.py: --fallback for empty/unresolvable Organism -----------
+# --fallback covers rows with an empty or unresolvable Organism field.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/fallback.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -142,6 +212,23 @@ fb_sp="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/fallback.tsv" 2>/dev/null || true
 assert_eq "parse_runtable: --fallback assigns key when Organism is empty" "$fb_sp" "My_species"
 rm -rf "$tmpd"
 
+# --- Bundled example RunTable ------------------------------------------------
+# run.sh --example depends on this file parsing to exactly one usable sample.
+tmpd="$(mktemp -d)"
+SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
+RUN_TABLE="${PIPELINE_DIR}/examples/SraRunTable.example.csv"
+SAMPLES_TSV="${tmpd}/samples.tsv"
+parse_samples >/dev/null 2>&1 || true
+
+ex_rows="$(awk 'NR>1' "$SAMPLES_TSV" 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+assert_eq "example RunTable: 1 sample" "$ex_rows" "1"
+assert_eq "example RunTable: species"  \
+    "$(awk -F'\t' 'NR==2{print $2}' "$SAMPLES_TSV" 2>/dev/null || true)" "Helicoverpa_armigera"
+assert_eq "example RunTable: layout"   \
+    "$(awk -F'\t' 'NR==2{print $3}' "$SAMPLES_TSV" 2>/dev/null || true)" "PAIRED"
+rm -rf "$tmpd"
+unset RUN_TABLE SAMPLES_TSV
+
 # --- parse_samples: restricts output to the active SPECIES_CONFIG species -----
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/runtable.csv" <<'CSV'
@@ -153,7 +240,6 @@ CSV
 SPECIES_CONFIG=( "Helicoverpa_armigera|url|url|true" "Danio_rerio|url|url|false" )
 RUN_TABLE="${tmpd}/runtable.csv"
 SAMPLES_TSV="${tmpd}/samples.tsv"
-source "${PIPELINE_DIR}/steps/parse_samples.sh"
 parse_samples >/dev/null 2>&1 || true
 
 ps_rows="$(awk 'NR>1' "${tmpd}/samples.tsv" 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
@@ -162,6 +248,25 @@ ps_sp="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/samples.tsv" 2>/dev/null || true)
 assert_eq "parse_samples: kept the active species" "$ps_sp" "Helicoverpa_armigera"
 rm -rf "$tmpd"
 unset SPECIES_CONFIG RUN_TABLE SAMPLES_TSV
+
+# --- CLI ---------------------------------------------------------------------
+# --help must work without any external tool installed, so it has to be handled
+# before the pre-flight check.
+run_help="$(bash "${PIPELINE_DIR}/run.sh" --help)"
+for flag in --build-refs --test --full --example; do
+    assert_eq "run.sh --help documents ${flag}" \
+        "$(grep -q -- "$flag" <<< "$run_help" && echo yes || echo no)" "yes"
+done
+assert_fails "run.sh rejects unknown flags" bash "${PIPELINE_DIR}/run.sh" --nope
+assert_succeeds "setup.sh --help" bash "${PIPELINE_DIR}/setup.sh" --help
+assert_fails "setup.sh rejects unknown flags" bash "${PIPELINE_DIR}/setup.sh" --nope
+
+# --- Syntax ------------------------------------------------------------------
+syntax_errors=0
+while IFS= read -r script; do
+    bash -n "$script" || (( ++syntax_errors ))
+done < <(find "$PIPELINE_DIR" -name '*.sh' -type f | sort)
+assert_eq "all shell scripts parse" "$syntax_errors" "0"
 
 # --- Summary -----------------------------------------------------------------
 echo ""
