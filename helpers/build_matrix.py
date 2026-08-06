@@ -109,10 +109,14 @@ def bbduk_qc(log_dir: Path, output: Path) -> None:
             if not m:
                 continue
             lbl = m.group("label").replace(" ", "_")
-            d[f"{lbl}_reads"]         = m.group("reads")
-            d[f"{lbl}_reads_percent"] = m.group("rpct") or "NA"
-            d[f"{lbl}_bases"]         = m.group("bases")
-            d[f"{lbl}_bases_percent"] = m.group("bpct") or "NA"
+            # BBDuk reports no percentage for the Input line — it is the 100%
+            # baseline — so those columns do not exist. Only fill known ones.
+            for column, value in ((f"{lbl}_reads", m.group("reads")),
+                                  (f"{lbl}_bases", m.group("bases")),
+                                  (f"{lbl}_reads_percent", m.group("rpct")),
+                                  (f"{lbl}_bases_percent", m.group("bpct"))):
+                if column in d:
+                    d[column] = value or "NA"
         rows.append(d)
 
     output.parent.mkdir(parents=True, exist_ok=True)
