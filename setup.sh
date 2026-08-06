@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup.sh — interactive configurator for OmniQuant-seq.
 #
-#   bash pipeline/setup.sh                 resources, then the species menu
+#   bash pipeline/setup.sh                 interactive menu
 #   bash pipeline/setup.sh --resources     compute resources only
 #   bash pipeline/setup.sh --species       species menu only
 #   bash pipeline/setup.sh --add-species   add one species and fetch its genome
@@ -16,73 +16,10 @@ SPECIES_CFG="${PIPELINE_DIR}/config/species.sh"
 
 source "$PIPELINE_CFG"
 source "${PIPELINE_DIR}/lib/utils.sh"
+source "${PIPELINE_DIR}/lib/prompt.sh"
+source "${PIPELINE_DIR}/lib/menu.sh"
 source "${PIPELINE_DIR}/lib/species_config.sh"
 source "${PIPELINE_DIR}/steps/build_references.sh"
-
-# =============================================================================
-# Prompt helpers
-# =============================================================================
-prompt_int() {
-    local var_name="$1" prompt_text="$2" current="$3" min="$4" max="$5"
-    local value
-    while true; do
-        read -rp "  ${prompt_text} [current: ${current}, range: ${min}–${max}]: " value
-        value="${value:-$current}"
-        if [[ "$value" =~ ^[0-9]+$ ]] && (( value >= min && value <= max )); then
-            printf -v "$var_name" '%s' "$value"
-            return
-        fi
-        echo "  Invalid input. Enter an integer between ${min} and ${max}."
-    done
-}
-
-prompt_storage() {
-    local var_name="$1" prompt_text="$2" current="$3"
-    local value
-    read -rp "  ${prompt_text} [current: ${current}]: " value
-    value="${value:-$current}"
-    if [[ "$value" =~ ^[0-9]+(G|T|M)$ ]]; then
-        printf -v "$var_name" '%s' "$value"
-    else
-        echo "  Invalid format (use e.g. 100G, 1T) — keeping current: ${current}"
-        printf -v "$var_name" '%s' "$current"
-    fi
-}
-
-prompt_url() {
-    local var_name="$1" prompt_text="$2"
-    local value
-    while true; do
-        read -rp "  ${prompt_text}: " value
-        if [[ "$value" =~ ^https?:// ]]; then
-            printf -v "$var_name" '%s' "$value"
-            return
-        fi
-        echo "  Must start with http:// or https://"
-    done
-}
-
-# Species keys are Genus_species: they name the references/ subdirectory and
-# must match the key parse_runtable.py derives from the RunTable Organism field.
-prompt_species_key() {
-    local var_name="$1" prompt_text="$2"
-    local value
-    while true; do
-        read -rp "  ${prompt_text}: " value
-        value="${value// /_}"
-        if [[ "$value" =~ ^[A-Za-z][A-Za-z0-9_]+$ ]]; then
-            printf -v "$var_name" '%s' "$value"
-            return
-        fi
-        echo "  Use letters, digits, and underscores only (e.g. Helicoverpa_armigera)."
-    done
-}
-
-confirm() {
-    local answer
-    read -rp " $1 [y/N]: " answer
-    [[ "$answer" =~ ^[Yy]$ ]]
-}
 
 # =============================================================================
 # Compute resources → config/pipeline.sh
@@ -161,6 +98,57 @@ configure_resources() {
 # =============================================================================
 # Species table → config/species.sh
 # =============================================================================
+
+# The species key is not a free-form label: it names a directory and routes
+# samples to references, so explain the format before asking for it.
+explain_species_key() {
+    cat <<'EOF'
+
+  Insert the name of the species (e.g. Helicoverpa_armigera). This key will be
+  used as the directory name and to route samples to references, so it must be
+  written as Genus_species — the same form parse_runtable.py derives from the
+  RunTable "Organism" column.
+EOF
+}
+
+# Ask for one species entry. Sets SPECIES_NEW_KEY / _FNA / _GTF; the caller
+# decides the active flag and when to upsert.
+prompt_new_species() {
+    explain_species_key
+    prompt_species_key SPECIES_NEW_KEY "Species key"
+    prompt_url         SPECIES_NEW_FNA "Genome FASTA URL (.fna.gz)"
+    prompt_url         SPECIES_NEW_GTF "Annotation GTF URL (.gtf.gz)"
+}
+
+# Download + decompress the references of one species and report the outcome.
+# Shared by --add-species and the species menu, so both give the same messages.
+fetch_and_report() {
+    local key="$1" fna_url="$2" gtf_url="$3"
+    local sp_dir="${REFERENCES_DIR}/${key}"
+
+    echo ""
+    echo "[INFO] Fetching reference files for ${key} into ${sp_dir}/ ..."
+    if ! fetch_species_references "$key" "$fna_url" "$gtf_url"; then
+        echo "[ERROR] Could not obtain the reference files for ${key}." >&2
+        echo "        Check the two URLs, the free disk space, and write access" >&2
+        echo "        to ${sp_dir}/, then re-run:" >&2
+        echo "          bash pipeline/setup.sh --add-species" >&2
+        return 1
+    fi
+
+    echo ""
+    echo "========================================================"
+    echo " Species ${key} configured successfully."
+    echo " Files downloaded to ${sp_dir}/ and ready for STAR/RSEM"
+    echo " index building:"
+    echo "   Genome     : ${sp_dir}/genome.fa"
+    echo "   Annotation : ${sp_dir}/genes.gtf"
+    echo ""
+    echo " Build the indexes with:"
+    echo "   bash pipeline/run.sh --build-refs"
+    echo "========================================================"
+}
+
 show_species() {
     local i status
     echo ""
@@ -239,15 +227,17 @@ configure_species() {
         SP_GTF=( "${gtf[@]}" );   SP_ACTIVE=( "${active[@]}" )
     fi
 
-    local new_key new_fna new_gtf new_active
+    # Entries added here are downloaded only after the config file is written,
+    # so an aborted session never leaves genomes on disk with no entry.
+    local pending=() new_active
     while confirm "Add a new species?"; do
-        prompt_species_key new_key "Insert the name of the species (e.g. Helicoverpa_armigera)"
-        prompt_url         new_fna "Genome FASTA URL (.fna.gz)"
-        prompt_url         new_gtf "Annotation GTF URL (.gtf.gz)"
+        prompt_new_species
         new_active="true"
         confirm "Include in the next run?" || new_active="false"
-        species_config_upsert "$new_key" "$new_fna" "$new_gtf" "$new_active"
-        echo "  ${SPECIES_CONFIG_LAST_ACTION}: ${new_key} [${new_active}]"
+        species_config_upsert "$SPECIES_NEW_KEY" "$SPECIES_NEW_FNA" \
+                              "$SPECIES_NEW_GTF" "$new_active"
+        echo "  ${SPECIES_CONFIG_LAST_ACTION}: ${SPECIES_NEW_KEY} [${new_active}]"
+        pending+=( "${SPECIES_NEW_KEY}|${SPECIES_NEW_FNA}|${SPECIES_NEW_GTF}" )
     done
 
     echo ""
@@ -255,58 +245,55 @@ configure_species() {
     echo " Final species list:"
     show_species
     echo "========================================================"
-    if confirm "Write this to config/species.sh?"; then
-        species_config_save "$SPECIES_CFG" || die "Could not write ${SPECIES_CFG}"
-        echo " config/species.sh updated."
-    else
+    if ! confirm "Write this to config/species.sh?"; then
         echo " Skipped — config/species.sh unchanged."
+        return 0
     fi
+    species_config_save "$SPECIES_CFG" || die "Could not write ${SPECIES_CFG}"
+    echo " config/species.sh updated."
+
+    (( ${#pending[@]} > 0 )) || return 0
+    echo ""
+    if ! confirm "Download the genome and annotation of the new species now?"; then
+        echo " Skipped — fetch them later with: bash pipeline/run.sh --build-refs"
+        return 0
+    fi
+
+    local entry key fna gtf failed=0
+    for entry in "${pending[@]}"; do
+        IFS='|' read -r key fna gtf <<< "$entry"
+        fetch_and_report "$key" "$fna" "$gtf" || failed=1
+    done
+    return "$failed"
 }
 
 # =============================================================================
 # Add one species and fetch its reference files
 # =============================================================================
 add_species() {
-    local key fna_url gtf_url
-
     echo ""
     echo "========================================================"
     echo " Add a species"
     echo " The genome and annotation are downloaded into"
     echo " ${REFERENCES_DIR}/<species_key>/ and the entry is written to"
-    echo " config/species.sh."
+    echo " config/species.sh as:"
+    echo "   \"species_key|genome_fna_gz_url|genome_gtf_gz_url|active\""
     echo "========================================================"
 
-    prompt_species_key key     "Insert the name of the species (e.g. Helicoverpa_armigera)"
-    prompt_url         fna_url "Genome FASTA URL (.fna.gz)"
-    prompt_url         gtf_url "Annotation GTF URL (.gtf.gz)"
+    prompt_new_species
 
     echo ""
     species_config_load "$SPECIES_CFG"
-    species_config_upsert "$key" "$fna_url" "$gtf_url" "true"
+    species_config_upsert "$SPECIES_NEW_KEY" "$SPECIES_NEW_FNA" "$SPECIES_NEW_GTF" "true"
     species_config_save "$SPECIES_CFG" \
         || die "Could not write ${SPECIES_CFG} — check file permissions."
-    echo "[OK] Entry ${SPECIES_CONFIG_LAST_ACTION} in config/species.sh: ${key}"
+    echo "[OK] Entry ${SPECIES_CONFIG_LAST_ACTION} in config/species.sh: ${SPECIES_NEW_KEY}"
 
-    echo ""
-    echo "[INFO] Fetching reference files for ${key} ..."
-    if ! fetch_species_references "$key" "$fna_url" "$gtf_url"; then
-        echo "[ERROR] Could not obtain the reference files for ${key}." >&2
-        echo "        The entry is kept in config/species.sh; check the URLs" >&2
-        echo "        and free space, then re-run: bash pipeline/setup.sh --add-species" >&2
+    if ! fetch_and_report "$SPECIES_NEW_KEY" "$SPECIES_NEW_FNA" "$SPECIES_NEW_GTF"; then
+        echo "        The entry is kept in config/species.sh, so only the URLs" >&2
+        echo "        need fixing." >&2
         return 1
     fi
-
-    local sp_dir="${REFERENCES_DIR}/${key}"
-    echo ""
-    echo "========================================================"
-    echo " ${key} is ready."
-    echo "   Genome     : ${sp_dir}/genome.fa"
-    echo "   Annotation : ${sp_dir}/genes.gtf"
-    echo ""
-    echo " Build the STAR and RSEM indexes with:"
-    echo "   bash pipeline/run.sh --build-refs"
-    echo "========================================================"
 }
 
 # =============================================================================
@@ -316,28 +303,43 @@ usage() {
     cat <<'EOF'
 OmniQuant-seq setup — writes config/pipeline.sh and config/species.sh.
 
-Usage: bash pipeline/setup.sh [MODE]
+Usage:
+  bash pipeline/setup.sh            Interactive menu
+  bash pipeline/setup.sh [MODE]     Go straight to one step
 
 Modes:
-  (none)          Compute resources, then the species menu.
   --resources     Compute resources only (threads, RAM, storage).
-  --species       Species menu only (toggle, delete, add entries).
+  --species       Species menu only: toggle, delete or add entries, with an
+                  optional genome download for the entries just added.
   --add-species   Add or update one species: prompts for the species key and
                   the genome FASTA / annotation GTF URLs, writes the entry to
                   config/species.sh, then downloads and decompresses both files
                   into references/<species_key>/. Exits non-zero if any step
                   fails.
-  -h, --help      Show this message.
+
+Options:
+  -i, --interactive  Show the menu even when other arguments are given.
+  -h, --help         Show this message.
+
+Examples:
+  bash pipeline/setup.sh                  # menu: resources, species, runs
+  bash pipeline/setup.sh --resources      # only threads / RAM / storage
+  bash pipeline/setup.sh --add-species    # add one organism + fetch its genome
+
+A species key is a Genus_species identifier (e.g. Helicoverpa_armigera): it
+names the references/<species_key>/ directory and routes each sample to its
+reference, so it must match the RunTable "Organism" column.
 EOF
 }
 
 main() {
     case "${1:-}" in
-        "")            configure_resources; configure_species ;;
-        --resources)   configure_resources ;;
-        --species)     configure_species ;;
-        --add-species) add_species; return ;;
-        -h|--help)     usage; return 0 ;;
+        "")               menu_main; return 0 ;;
+        -i|--interactive) menu_main; return 0 ;;
+        --resources)      configure_resources ;;
+        --species)        configure_species ;;
+        --add-species)    add_species; return ;;
+        -h|--help)        usage; return 0 ;;
         *)
             echo "[ABORT] Unknown argument: $1" >&2
             echo "" >&2
