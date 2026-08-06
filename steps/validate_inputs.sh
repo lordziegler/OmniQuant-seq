@@ -61,9 +61,3 @@ detect_local_references() {
     echo "[OK] FASTA    : ${FNA_FILE} (local override)"
     echo "[OK] GTF      : ${GTF_FILE} (local override)"
 }
-
-detect_inputs() {
-    local search_dir="${1:-.}"
-    detect_run_table "$search_dir"
-    detect_local_references "$search_dir"
-}

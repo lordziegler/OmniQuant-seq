@@ -23,7 +23,7 @@ step_multiqc_sample() {
         zips=( "fastqc_out/${srr}_clean_fastqc.zip" )
     fi
 
-    local missing=false
+    local missing=false z
     for z in "${zips[@]}"; do [[ ! -f "$z" ]] && missing=true; done
     if [[ "$missing" == true ]]; then
         log_step "$srr" "MULTIQC" "Clean FastQC zips missing — skipping."
@@ -39,6 +39,7 @@ step_multiqc_sample() {
 # Global MultiQC over all samples at the end of the pipeline.
 step_multiqc_global() {
     local mqc_out="${RESULTS_DIR}/qc/multiqc/global"
+    local raw_zips=() clean_zips=() bbduk_logs=()
     mkdir -p "$mqc_out"
 
     mapfile -t raw_zips < <(find fastqc_out -maxdepth 1 -name "*_fastqc.zip" \

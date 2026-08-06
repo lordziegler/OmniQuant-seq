@@ -1,6 +1,6 @@
 # Example dataset
 
-`SraRunTable.example.csv` is the RunTable used by `bash pipeline/run.sh --example`.
+`SraRunTable.example.csv` is the RunTable used by `bash run.sh --example`.
 
 | Field | Value |
 |:--|:--|

@@ -8,8 +8,8 @@
 #   *_url        gzip-compressed genome FASTA and annotation GTF.
 #   active       false skips the species without removing its entry.
 #
-# Add entries with `bash pipeline/setup.sh --add-species` (prompts for the key
-# and both URLs, then downloads the files), or edit this file directly.
+# Add entries with `bash setup.sh --add-species` (prompts for the key and both
+# URLs, then downloads the files), or edit this file directly.
 #
 # Helicoverpa armigera ships as the reference example — it is the dataset used
 # by `run.sh --example` and by the tests. See "Additional species examples" in

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # setup.sh — interactive configurator for OmniQuant-seq.
 #
-#   bash pipeline/setup.sh                 interactive menu
-#   bash pipeline/setup.sh --resources     compute resources only
-#   bash pipeline/setup.sh --species       species menu only
-#   bash pipeline/setup.sh --add-species   add one species and fetch its genome
+#   bash setup.sh                 interactive menu
+#   bash setup.sh --resources     compute resources only
+#   bash setup.sh --species       species menu only
+#   bash setup.sh --add-species   add one species and fetch its genome
 #
 # Writes config/pipeline.sh and config/species.sh. Nothing else is modified.
 
@@ -132,7 +132,7 @@ fetch_and_report() {
         echo "[ERROR] Could not obtain the reference files for ${key}." >&2
         echo "        Check the two URLs, the free disk space, and write access" >&2
         echo "        to ${sp_dir}/, then re-run:" >&2
-        echo "          bash pipeline/setup.sh --add-species" >&2
+        echo "          bash setup.sh --add-species" >&2
         return 1
     fi
 
@@ -145,7 +145,7 @@ fetch_and_report() {
     echo "   Annotation : ${sp_dir}/genes.gtf"
     echo ""
     echo " Build the indexes with:"
-    echo "   bash pipeline/run.sh --build-refs"
+    echo "   bash run.sh --build-refs"
     echo "========================================================"
 }
 
@@ -255,7 +255,7 @@ configure_species() {
     (( ${#pending[@]} > 0 )) || return 0
     echo ""
     if ! confirm "Download the genome and annotation of the new species now?"; then
-        echo " Skipped — fetch them later with: bash pipeline/run.sh --build-refs"
+        echo " Skipped — fetch them later with: bash run.sh --build-refs"
         return 0
     fi
 
@@ -304,8 +304,8 @@ usage() {
 OmniQuant-seq setup — writes config/pipeline.sh and config/species.sh.
 
 Usage:
-  bash pipeline/setup.sh            Interactive menu
-  bash pipeline/setup.sh [MODE]     Go straight to one step
+  bash setup.sh            Interactive menu
+  bash setup.sh [MODE]     Go straight to one step
 
 Modes:
   --resources     Compute resources only (threads, RAM, storage).
@@ -322,9 +322,9 @@ Options:
   -h, --help         Show this message.
 
 Examples:
-  bash pipeline/setup.sh                  # menu: resources, species, runs
-  bash pipeline/setup.sh --resources      # only threads / RAM / storage
-  bash pipeline/setup.sh --add-species    # add one organism + fetch its genome
+  bash setup.sh                  # menu: resources, species, runs
+  bash setup.sh --resources      # only threads / RAM / storage
+  bash setup.sh --add-species    # add one organism + fetch its genome
 
 A species key is a Genus_species identifier (e.g. Helicoverpa_armigera): it
 names the references/<species_key>/ directory and routes each sample to its
@@ -350,10 +350,10 @@ main() {
     echo ""
     echo "========================================================"
     echo " Setup complete. Next steps:"
-    echo "   bash pipeline/run.sh --build-refs   # build genome indexes (once)"
-    echo "   bash pipeline/run.sh --example      # small demo run"
-    echo "   bash pipeline/run.sh --test         # smoke test on your samples"
-    echo "   bash pipeline/run.sh --full         # full run"
+    echo "   bash run.sh --build-refs   # build genome indexes (once)"
+    echo "   bash run.sh --example      # small demo run"
+    echo "   bash run.sh --test         # smoke test on your samples"
+    echo "   bash run.sh --full         # full run"
     echo "========================================================"
 }
 

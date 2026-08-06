@@ -1,19 +1,12 @@
-# Pipeline working directories (created at the project root by run.sh)
+# Working directories and outputs, created by run.sh in the working directory
 sra/
 fastq/
 clean_fastq/
 fastqc_out/
-multiqc_out/
 references/
-
-# Pipeline outputs
-pipeline/logs/
-pipeline/tmp/
-pipeline/results/
-output/
-work/
+results/
 logs/
-rsem_results/
+tmp/
 
 # Big files
 *.fastq

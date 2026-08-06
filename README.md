@@ -42,13 +42,13 @@ conda env create -f environment.yml
 conda activate omniquant-seq
 
 # Interactive menu — configure, build references, run
-bash pipeline/run.sh
+bash run.sh
 
 # See every mode and what it does
-bash pipeline/run.sh --help
+bash run.sh --help
 
 # Small self-contained demo (Helicoverpa armigera, 1 run, 25k reads)
-bash pipeline/run.sh --example
+bash run.sh --example
 ```
 
 Run with no arguments on a terminal and both entry points open the same menu:
@@ -77,27 +77,31 @@ For your own dataset:
 
 ```bash
 # 1. Configure compute resources and species (interactive menu)
-bash pipeline/setup.sh
+bash setup.sh
 
 #    ...or add a single organism, genome download included:
-bash pipeline/setup.sh --add-species
+bash setup.sh --add-species
 
 #    ...or edit the two config files directly:
 #    config/pipeline.sh — thread counts, paths, run flags
 #    config/species.sh  — species keys + genome/GTF URLs, active flag
 
 # 2. Build references once per active species
-bash pipeline/run.sh --build-refs
+bash run.sh --build-refs
 
 # 3. Smoke test on your samples (limited reads)
-bash pipeline/run.sh --test
+bash run.sh --test
 
 # 4. Full production run
-bash pipeline/run.sh --full
+bash run.sh --full
 ```
 
-Run from the **project root** — the directory holding your SRA RunTable.
-Outputs are written under `pipeline/results/` and `pipeline/logs/`.
+Every path the pipeline reads or writes is relative to the **working
+directory**: the SRA RunTable is looked up there, and `sra/`, `fastq/`,
+`clean_fastq/`, `fastqc_out/`, `references/`, `results/`, `logs/` and `tmp/`
+are created there. The commands above assume the working directory is the
+repository root; to keep data out of the checkout, `cd` to your data directory
+and call the entry point by path: `bash /path/to/OmniQuant-seq/run.sh --full`.
 
 ---
 
@@ -168,7 +172,7 @@ config entry so the URLs can be corrected, and exits non-zero.
 ## The `--example` run
 
 ```bash
-bash pipeline/run.sh --example
+bash run.sh --example
 ```
 
 A complete, small run that exercises every stage, meant to show the flow
@@ -185,13 +189,13 @@ before committing to a real dataset.
 What to expect afterwards:
 
 ```
-pipeline/results/tables/gene_expression_matrix.tsv        TPM + FPKM columns for SRR29271587
-pipeline/results/tables/STAR_mapping_QC_matrix.tsv        STAR Log.final.out metrics
-pipeline/results/tables/BBDUK_preprocessing_QC_matrix.tsv BBDuk trimming stats
-pipeline/results/rsem/Helicoverpa_armigera/               RSEM gene- and isoform-level results
-pipeline/results/qc/multiqc/                              per-sample and global MultiQC reports
-pipeline/results/pipeline_sample_summary.tsv              one row, all stages OK
-pipeline/logs/SRR29271587.log                             per-stage log for the sample
+results/tables/gene_expression_matrix.tsv        TPM + FPKM columns for SRR29271587
+results/tables/STAR_mapping_QC_matrix.tsv        STAR Log.final.out metrics
+results/tables/BBDUK_preprocessing_QC_matrix.tsv BBDuk trimming stats
+results/rsem/Helicoverpa_armigera/               RSEM gene- and isoform-level results
+results/qc/multiqc/                              per-sample and global MultiQC reports
+results/pipeline_sample_summary.tsv              one row, all stages OK
+logs/SRR29271587.log                             per-stage log for the sample
 ```
 
 > **Cost.** The example reads 25k spots but `prefetch` still downloads the
@@ -204,7 +208,7 @@ pipeline/logs/SRR29271587.log                             per-stage log for the 
 ## Repository structure
 
 ```
-pipeline/
+OmniQuant-seq/
 ├── run.sh                          # Entry point — parses the CLI, delegates to the modules
 ├── setup.sh                        # Interactive configurator (resources + species)
 ├── config/
@@ -278,7 +282,7 @@ conda activate omniquant-seq
 
 ### Step 0 — Configure compute resources
 
-Run `bash pipeline/setup.sh --resources`, or edit `config/pipeline.sh`
+Run `bash setup.sh --resources`, or edit `config/pipeline.sh`
 directly. The defaults are conservative:
 
 ```bash
@@ -304,7 +308,7 @@ Key run flags:
 ### Step 1 — Build genome references *(run once per species)*
 
 ```bash
-bash pipeline/run.sh --build-refs
+bash run.sh --build-refs
 ```
 
 For each species with `active=true` in `config/species.sh`:
@@ -336,7 +340,7 @@ passing the active species from `config/species.sh` so that only organisms you
 have references for reach `samples.tsv`. To run it in isolation:
 
 ```bash
-python3 pipeline/helpers/parse_runtable.py \
+python3 helpers/parse_runtable.py \
     --input   SraRunTable.csv \
     --output  samples.tsv \
     --species Helicoverpa_armigera
@@ -361,8 +365,8 @@ Review `samples.tsv` before a full run.
 ### Step 3 — Run the quantification loop
 
 ```bash
-bash pipeline/run.sh --test    # fast validation with limited reads
-bash pipeline/run.sh --full    # full production run
+bash run.sh --test    # fast validation with limited reads
+bash run.sh --full    # full production run
 ```
 
 Per-sample steps for each accession in `samples.tsv`:
@@ -386,7 +390,7 @@ BAM, incomplete `genes.results` — is deleted before the retry, so no pass ever
 reads a partial file as if it were complete. `Ctrl-C` (SIGINT) and SIGTERM do
 the same for the sample in flight, then exit 130. Only one run at a time is
 allowed: a second `run.sh` in the same directory aborts on the `flock` held at
-`pipeline/tmp/pipeline.lock`, instead of two pipelines overwriting each other's
+`tmp/pipeline.lock`, instead of two pipelines overwriting each other's
 intermediates.
 
 ### Step 4 — Post-processing *(automatic at end of run)*
@@ -394,13 +398,13 @@ intermediates.
 `postprocess_all` runs after the sample loop. To run it manually:
 
 ```bash
-python3 pipeline/helpers/build_matrix.py \
-    --rsem-dir   pipeline/results/rsem \
-    --output     pipeline/results/tables/gene_expression_matrix.tsv \
-    --star-logs  pipeline/logs/ \
-    --bbduk-logs pipeline/logs/ \
-    --star-out   pipeline/results/tables/STAR_mapping_QC_matrix.tsv \
-    --bbduk-out  pipeline/results/tables/BBDUK_preprocessing_QC_matrix.tsv
+python3 helpers/build_matrix.py \
+    --rsem-dir   results/rsem \
+    --output     results/tables/gene_expression_matrix.tsv \
+    --star-logs  logs/ \
+    --bbduk-logs logs/ \
+    --star-out   results/tables/STAR_mapping_QC_matrix.tsv \
+    --bbduk-out  results/tables/BBDUK_preprocessing_QC_matrix.tsv
 ```
 
 ### Step 5 — Expression matrix preview *(automatic at end of run)*
@@ -432,7 +436,7 @@ Nothing in the pipeline is tied to a taxon. To process a different organism:
    directly:
 
    ```bash
-   bash pipeline/setup.sh --add-species
+   bash setup.sh --add-species
    ```
 
    or add the entry to `config/species.sh` by hand:
@@ -459,7 +463,7 @@ Nothing in the pipeline is tied to a taxon. To process a different organism:
    (`min(14, log2(genome length)/2 − 1)` for small genomes). See
    [Configuration reference](#configuration-reference).
 
-5. **Build the indexes:** `bash pipeline/run.sh --build-refs`.
+5. **Build the indexes:** `bash run.sh --build-refs`.
 
 ### Additional species examples
 
@@ -503,7 +507,7 @@ the NCBI Genomes FTP directory of the assembly you want, taking the
 ## Output files
 
 ```
-pipeline/results/
+results/
 ├── rsem/
 │   └── <species_key>/
 │       ├── <SRR>.genes.results       # TPM, FPKM, expected_count (gene level)
@@ -519,7 +523,7 @@ pipeline/results/
 ├── samples.tsv                       # Parsed sample list (SRR, SPECIES, LAYOUT)
 └── pipeline_sample_summary.tsv       # Per-sample status tracker
 
-pipeline/logs/
+logs/
 ├── <SRR>.log                         # Per-sample cumulative log (all steps)
 ├── <SRR>_prefetch_<n>.log
 ├── <SRR>_bbduk.log
@@ -603,7 +607,7 @@ sets all three to `false` automatically.
 ## Testing
 
 ```bash
-bash pipeline/tests/test_pipeline.sh
+bash tests/test_pipeline.sh
 ```
 
 69 unit tests, no bioinformatics tool and no network access required:
@@ -612,9 +616,9 @@ bash pipeline/tests/test_pipeline.sh
 - `require_file` — missing file aborts, existing file passes
 - `species_config` — entry splitting, active-key filtering, upsert
   (add vs. update), save/load round-trip, index lookup
-- `detect_inputs` — RunTable detection, local genome override with one active
-  species, override *ignored* with several, ambiguous RunTable aborts,
-  references optional
+- `detect_run_table` / `detect_local_references` — RunTable detection, local
+  genome override with one active species, override *ignored* with several,
+  ambiguous RunTable aborts, references optional
 - `parse_runtable.py` — row count, accession, layout, species-key derivation,
   non-example organism, `--species` filtering, `--fallback`
 - `examples/SraRunTable.example.csv` — parses to exactly one usable sample

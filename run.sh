@@ -36,8 +36,8 @@ usage() {
 OmniQuant-seq — RNA-seq TPM/FPKM quantification for any organism.
 
 Usage:
-  bash pipeline/run.sh              Interactive menu (on a terminal)
-  bash pipeline/run.sh [MODE]       Non-interactive, scriptable run
+  bash run.sh              Interactive menu (on a terminal)
+  bash run.sh [MODE]       Non-interactive, scriptable run
 
 Modes:
   --build-refs   Download genome + annotation for every active species in
@@ -60,12 +60,12 @@ Options:
   -h, --help         Show this message.
 
 Examples:
-  bash pipeline/run.sh                      # menu: configure, build, run
-  bash pipeline/run.sh --example            # bundled ${EXAMPLE_SPECIES} demo
-  bash pipeline/run.sh --build-refs         # indexes only, once per species
-  bash pipeline/run.sh --test               # smoke test on your samples
-  bash pipeline/run.sh --full --no-preview  # production run, quiet ending
-  bash pipeline/setup.sh --add-species      # add an organism + fetch its genome
+  bash run.sh                      # menu: configure, build, run
+  bash run.sh --example            # bundled ${EXAMPLE_SPECIES} demo
+  bash run.sh --build-refs         # indexes only, once per species
+  bash run.sh --test               # smoke test on your samples
+  bash run.sh --full --no-preview  # production run, quiet ending
+  bash setup.sh --add-species      # add an organism + fetch its genome
 
 With no mode and no terminal attached (cron, cluster job), the pipeline runs
 with the TEST_MODE value from config/pipeline.sh (currently: ${TEST_MODE}).
@@ -75,18 +75,18 @@ Inputs are read from the current directory: exactly one SRA RunTable
 in place of the download URLs when exactly one species is active.
 
 Outputs:
-  pipeline/results/tables/   expression matrix + STAR/BBDuk QC matrices
-  pipeline/results/rsem/     per-sample RSEM results
-  pipeline/results/qc/       MultiQC reports
-  pipeline/logs/             per-sample and per-tool logs
+  results/tables/   expression matrix + STAR/BBDuk QC matrices
+  results/rsem/     per-sample RSEM results
+  results/qc/       MultiQC reports
+  logs/             per-sample and per-tool logs
 
 A run ends by printing the first ${PREVIEW_LINES} lines of
-pipeline/results/tables/gene_expression_matrix.tsv (the inner join of every
-sample). Change PREVIEW_LINES / ENABLE_PREVIEW in config/pipeline.sh, or pass
+results/tables/gene_expression_matrix.tsv (the inner join of every sample).
+Change PREVIEW_LINES / ENABLE_PREVIEW in config/pipeline.sh, or pass
 --no-preview.
 
 Species are configured in config/species.sh. To add one interactively
-(with genome download):  bash pipeline/setup.sh --add-species
+(with genome download):  bash setup.sh --add-species
 EOF
 }
 
@@ -139,7 +139,7 @@ if [[ "$EXAMPLE_MODE" == true ]]; then
     species_config_load "${PIPELINE_DIR}/config/species.sh"
     example_idx="$(species_config_index "$EXAMPLE_SPECIES")"
     (( example_idx >= 0 )) || die \
-        "${EXAMPLE_SPECIES} is not in config/species.sh — restore it or run: bash pipeline/setup.sh --add-species"
+        "${EXAMPLE_SPECIES} is not in config/species.sh — restore it or run: bash setup.sh --add-species"
     SPECIES_CONFIG=( "${EXAMPLE_SPECIES}|${SP_FNA[$example_idx]}|${SP_GTF[$example_idx]}|true" )
 fi
 

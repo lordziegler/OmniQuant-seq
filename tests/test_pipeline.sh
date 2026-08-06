@@ -2,7 +2,7 @@
 # Unit tests for the pure-bash and Python layers.
 # No bioinformatics tool and no network access is required.
 #
-#   bash pipeline/tests/test_pipeline.sh
+#   bash tests/test_pipeline.sh
 set -euo pipefail
 
 PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -106,37 +106,40 @@ assert_eq "species_config save/load: active" "${SP_ACTIVE[0]}" "false"
 assert_eq "species_config_index: absent key" "$(species_config_index Nope)" "-1"
 rm -rf "$tmpd"
 
-# --- detect_inputs -----------------------------------------------------------
+# --- input detection ----------------------------------------------------------
 # One active species: a local FASTA + GTF override the download URLs.
 tmpd="$(mktemp -d)"
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 touch "${tmpd}/genome.fna.gz" "${tmpd}/annotation.gtf.gz" "${tmpd}/SraRunTable.csv"
 RUN_TABLE=""
-detect_inputs "$tmpd" >/dev/null
-assert_eq "detect_inputs: RUN_TABLE set" "$RUN_TABLE" "${tmpd}/SraRunTable.csv"
-assert_eq "detect_inputs: FNA_FILE set"  "$FNA_FILE"  "${tmpd}/genome.fna.gz"
-assert_eq "detect_inputs: GTF_FILE set"  "$GTF_FILE"  "${tmpd}/annotation.gtf.gz"
+detect_local_references "$tmpd" >/dev/null
+detect_run_table "$tmpd" >/dev/null
+assert_eq "detect_run_table: RUN_TABLE set" "$RUN_TABLE" "${tmpd}/SraRunTable.csv"
+assert_eq "detect_local_references: FNA_FILE set"  "$FNA_FILE"  "${tmpd}/genome.fna.gz"
+assert_eq "detect_local_references: GTF_FILE set"  "$GTF_FILE"  "${tmpd}/annotation.gtf.gz"
 
 # Two active species: a single local genome cannot be assigned, so it is ignored
 # rather than silently used for every organism.
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" "Danio_rerio|f|g|true" )
 RUN_TABLE=""
-detect_inputs "$tmpd" >/dev/null
-assert_eq "detect_inputs: local genome ignored for multi-species" "$FNA_FILE" ""
+detect_local_references "$tmpd" >/dev/null
+detect_run_table "$tmpd" >/dev/null
+assert_eq "detect_local_references: local genome ignored for multi-species" "$FNA_FILE" ""
 
 # A second RunTable is ambiguous and must abort.
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 touch "${tmpd}/other_RunTable.csv"
 RUN_TABLE=""
-assert_fails "detect_inputs: two RunTables abort" detect_inputs "$tmpd"
+assert_fails "detect_run_table: two RunTables abort" detect_run_table "$tmpd"
 rm -rf "$tmpd"
 
 # References are optional — a RunTable alone is a valid input set.
 tmpd="$(mktemp -d)"
 touch "${tmpd}/SraRunTable.csv"
 RUN_TABLE=""
-detect_inputs "$tmpd" >/dev/null
-assert_eq "detect_inputs: no local genome needed" "$FNA_FILE" ""
+detect_local_references "$tmpd" >/dev/null
+detect_run_table "$tmpd" >/dev/null
+assert_eq "detect_local_references: no local genome needed" "$FNA_FILE" ""
 rm -rf "$tmpd"
 unset RUN_TABLE
 

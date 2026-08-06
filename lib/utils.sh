@@ -12,7 +12,7 @@ die() {
     exit 1
 }
 
-# Per-sample log line, echoed and appended to pipeline/logs/<sample>.log.
+# Per-sample log line, echoed and appended to ${LOG_DIR}/<sample>.log.
 log_step() {
     local srr="$1" tag="$2" msg="$3"
     local ts line

@@ -82,6 +82,6 @@ resolve_reference_paths() {
     local species="$1"
     STAR_INDEX="${REFERENCES_DIR}/${species}/STAR_genome_index"
     RSEM_REF="${REFERENCES_DIR}/${species}/rsem_ref"
-    require_dir  "$STAR_INDEX"     "Run: bash pipeline/run.sh --build-refs"
-    require_file "${RSEM_REF}.grp" "Run: bash pipeline/run.sh --build-refs"
+    require_dir  "$STAR_INDEX"     "Run: bash run.sh --build-refs"
+    require_file "${RSEM_REF}.grp" "Run: bash run.sh --build-refs"
 }
