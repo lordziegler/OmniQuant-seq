@@ -52,7 +52,8 @@ STAR_SA_INDEX_NBASES=12
 BBDUK_QTRIM="rl"
 BBDUK_TRIMQ=10
 BBDUK_MINLEN=36
-BBDUK_REF=""       # adapter FASTA — leave empty to skip adapter clipping
+# Adapter FASTA — leave empty to skip adapter clipping.
+BBDUK_REF=""
 BBDUK_KTRIM=""
 BBDUK_K=""
 BBDUK_MINK=""

@@ -3,6 +3,7 @@
 #
 #   bash setup.sh                 interactive menu
 #   bash setup.sh --resources     compute resources only
+#   bash setup.sh --analysis      analysis parameters only
 #   bash setup.sh --species       species menu only
 #   bash setup.sh --add-species   add one species and fetch its genome
 #
@@ -92,6 +93,74 @@ configure_resources() {
         -e "s|^MAX_SRA_SIZE=.*|MAX_SRA_SIZE=\"${new_sra_size}\"|" \
         -e "s|^DISK_WARN_GB=.*|DISK_WARN_GB=${new_disk_warn}|" \
         "$PIPELINE_CFG"
+    echo " config/pipeline.sh updated."
+}
+
+# =============================================================================
+# Analysis parameters → config/pipeline.sh
+# =============================================================================
+# The knobs configure_resources does not own. One row per variable:
+#   name|kind|constraint|prompt
+# kind is int (constraint is "min max"), choice (constraint lists the accepted
+# values) or path. Adding a knob here is the whole change; the loop below
+# prompts, validates and writes it.
+_ANALYSIS_PARAMS=(
+    "TEST_MODE|choice|true false|Limit runs to TEST_READS reads (TEST_MODE)"
+    "TEST_READS|int|1 1000000000|Reads per sample in test mode (TEST_READS)"
+    "PIPELINE_RETRY_PASSES|int|1 10|Passes over the sample list (PIPELINE_RETRY_PASSES)"
+    "PREFETCH_RETRIES|int|1 20|Download attempts per sample (PREFETCH_RETRIES)"
+    "PREFETCH_RETRY_SLEEP|int|0 3600|Seconds between attempts (PREFETCH_RETRY_SLEEP)"
+    "STAR_OVERHANG|int|1 500|sjdbOverhang, read length - 1 (STAR_OVERHANG)"
+    "STAR_SA_INDEX_NBASES|int|1 14|genomeSAindexNbases (STAR_SA_INDEX_NBASES)"
+    "BBDUK_QTRIM|choice|rl r l f|Trimming side (BBDUK_QTRIM)"
+    "BBDUK_TRIMQ|int|0 40|Quality threshold (BBDUK_TRIMQ)"
+    "BBDUK_MINLEN|int|1 1000|Minimum length after trimming (BBDUK_MINLEN)"
+    "BBDUK_REF|path||Adapter FASTA, none to skip clipping (BBDUK_REF)"
+)
+
+configure_analysis() {
+    # Not named `value`: the prompt_* helpers use that name for their own
+    # local, and printf -v would then write to theirs instead of ours.
+    local entry name kind constraint text current new_value quoted
+    local sed_args=() summary=()
+
+    echo ""
+    echo "========================================================"
+    echo " Analysis parameters"
+    echo " Press Enter to keep the current value."
+    echo "========================================================"
+    echo ""
+
+    for entry in "${_ANALYSIS_PARAMS[@]}"; do
+        IFS='|' read -r name kind constraint text <<< "$entry"
+        current="${!name}"
+        case "$kind" in
+            # shellcheck disable=SC2086  # constraint is a deliberate word list
+            int)    prompt_int    new_value "$text" "$current" $constraint ;;
+            choice) prompt_choice new_value "$text" "$current" $constraint ;;
+            path)   prompt_path   new_value "$text" "$current" ;;
+            *)      die "Unknown parameter kind '${kind}' for ${name}." ;;
+        esac
+
+        # Only ints are written bare; everything else may be empty or a word.
+        quoted="$new_value"
+        [[ "$kind" == int ]] || quoted="\"${new_value}\""
+        sed_args+=( -e "s|^${name}=.*|${name}=${quoted}|" )
+        summary+=( "$(printf '  %-22s : %s' "$name" "${new_value:-<empty>}")" )
+    done
+
+    echo ""
+    echo "========================================================"
+    echo " Summary — analysis parameters:"
+    printf '%s\n' "${summary[@]}"
+    echo "========================================================"
+
+    if ! confirm "Write these values to config/pipeline.sh?"; then
+        echo " Skipped — config/pipeline.sh unchanged."
+        return 0
+    fi
+
+    sed -i "${sed_args[@]}" "$PIPELINE_CFG"
     echo " config/pipeline.sh updated."
 }
 
@@ -309,6 +378,8 @@ Usage:
 
 Modes:
   --resources     Compute resources only (threads, RAM, storage).
+  --analysis      Analysis parameters: test mode, retries, STAR index and
+                  BBDuk trimming settings.
   --species       Species menu only: toggle, delete or add entries, with an
                   optional genome download for the entries just added.
   --add-species   Add or update one species: prompts for the species key and
@@ -324,6 +395,7 @@ Options:
 Examples:
   bash setup.sh                  # menu: resources, species, runs
   bash setup.sh --resources      # only threads / RAM / storage
+  bash setup.sh --analysis       # trimming, STAR index and retry settings
   bash setup.sh --add-species    # add one organism + fetch its genome
 
 A species key is a Genus_species identifier (e.g. Helicoverpa_armigera): it
@@ -337,6 +409,7 @@ main() {
         "")               menu_main; return 0 ;;
         -i|--interactive) menu_main; return 0 ;;
         --resources)      configure_resources ;;
+        --analysis)       configure_analysis ;;
         --species)        configure_species ;;
         --add-species)    add_species; return ;;
         -h|--help)        usage; return 0 ;;

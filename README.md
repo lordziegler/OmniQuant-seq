@@ -89,6 +89,7 @@ top of `steps/align.sh`.
 |:--|:--|
 | *(none)* | Menu |
 | `--resources` | Threads, RAM, storage |
+| `--analysis` | Test mode, retries, STAR index and BBDuk trimming settings |
 | `--species` | Toggle, delete or add entries, with an optional download afterwards |
 | `--add-species` | Add or update one species and fetch its reference files |
 
@@ -307,7 +308,9 @@ python3 helpers/build_matrix.py \
 
 ## Configuration
 
-`config/pipeline.sh` — edit directly or through `setup.sh --resources`.
+`config/pipeline.sh` — every variable below is set by `setup.sh`: resources
+through `--resources`, the rest through `--analysis`. Editing the file directly
+works too.
 
 | Variable | Default | Description |
 |:--|:--|:--|

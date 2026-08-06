@@ -272,19 +272,52 @@ for flag in --resources --species --add-species --interactive; do
         "$(grep -q -- "$flag" <<< "$setup_help" && echo yes || echo no)" "yes"
 done
 
+# --- setup.sh --analysis -----------------------------------------------------
+# Drives the real script over a throwaway copy of the repo, so the assertion is
+# that config/pipeline.sh was rewritten — not that a function was called.
+tmpd="$(mktemp -d)"
+mkdir -p "${tmpd}/config" "${tmpd}/lib" "${tmpd}/steps"
+cp "${PIPELINE_DIR}/setup.sh" "$tmpd/"
+cp "${PIPELINE_DIR}"/config/*.sh "${tmpd}/config/"
+cp "${PIPELINE_DIR}"/lib/*.sh    "${tmpd}/lib/"
+cp "${PIPELINE_DIR}"/steps/*.sh  "${tmpd}/steps/"
+
+# One answer per _ANALYSIS_PARAMS row, in order; empty keeps the current value.
+printf 'true\n5000\n\n\n\n120\n10\nf\n20\n50\nnone\ny\n' \
+    | bash "${tmpd}/setup.sh" --analysis >/dev/null 2>&1
+
+assert_eq "setup --analysis: writes a choice" \
+    "$(grep '^TEST_MODE=' "${tmpd}/config/pipeline.sh")" 'TEST_MODE="true"'
+assert_eq "setup --analysis: writes an int unquoted" \
+    "$(grep '^TEST_READS=' "${tmpd}/config/pipeline.sh")" 'TEST_READS=5000'
+assert_eq "setup --analysis: writes BBDuk settings" \
+    "$(grep '^BBDUK_QTRIM=' "${tmpd}/config/pipeline.sh")" 'BBDUK_QTRIM="f"'
+assert_eq "setup --analysis: empty answer keeps the current value" \
+    "$(grep '^PIPELINE_RETRY_PASSES=' "${tmpd}/config/pipeline.sh")" 'PIPELINE_RETRY_PASSES=3'
+assert_eq "setup --analysis: 'none' clears the adapter path" \
+    "$(grep '^BBDUK_REF=' "${tmpd}/config/pipeline.sh")" 'BBDUK_REF=""'
+
+# Declining the confirmation must leave the file untouched.
+cp "${PIPELINE_DIR}/config/pipeline.sh" "${tmpd}/config/pipeline.sh"
+printf 'true\n5000\n\n\n\n120\n10\nf\n20\n50\nnone\nn\n' \
+    | bash "${tmpd}/setup.sh" --analysis >/dev/null 2>&1
+assert_eq "setup --analysis: declining writes nothing" \
+    "$(diff -q "${PIPELINE_DIR}/config/pipeline.sh" "${tmpd}/config/pipeline.sh" >/dev/null && echo same)" "same"
+rm -rf "$tmpd"
+
 # --- Interactive menu --------------------------------------------------------
-# The menu must reject junk, keep asking, and leave on option 7 — all without
+# The menu must reject junk, keep asking, and leave on option 8 — all without
 # running any pipeline command.
 EXAMPLE_SPECIES="Helicoverpa_armigera"
-menu_out="$(printf '99\nzz\n\n7\n' | menu_main)"
+menu_out="$(printf '99\nzz\n\n8\n' | menu_main)"
 assert_eq "menu: rejects a non-listed number" \
     "$(grep -c "'99' is not a valid option" <<< "$menu_out")" "1"
 assert_eq "menu: rejects non-numeric input" \
     "$(grep -c "'zz' is not a valid option" <<< "$menu_out")" "1"
-assert_eq "menu: option 7 exits" \
+assert_eq "menu: option 8 exits" \
     "$(grep -c 'Bye.' <<< "$menu_out")" "1"
 assert_eq "menu: redraws after every answer" \
-    "$(grep -c '\[7\] Exit' <<< "$menu_out")" "4"
+    "$(grep -c '\[8\] Exit' <<< "$menu_out")" "4"
 
 # Closed stdin must end the menu instead of looping on EOF.
 assert_succeeds "menu: exits on EOF" bash -c \

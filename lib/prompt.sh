@@ -32,6 +32,39 @@ prompt_storage() {
     fi
 }
 
+# Read one of a fixed set of values; empty input keeps the current one.
+prompt_choice() {
+    local var_name="$1" prompt_text="$2" current="$3"; shift 3
+    local options=( "$@" ) value opt
+    while true; do
+        read -rp "  ${prompt_text} [current: ${current}, options: ${options[*]}]: " value
+        value="${value:-$current}"
+        for opt in "${options[@]}"; do
+            [[ "$value" == "$opt" ]] || continue
+            printf -v "$var_name" '%s' "$value"
+            return
+        done
+        echo "  Invalid input. Choose one of: ${options[*]}"
+    done
+}
+
+# Read a path to an existing file, or "none" to clear it. The value is written
+# into config/pipeline.sh through a sed replacement, so | and & are rejected.
+prompt_path() {
+    local var_name="$1" prompt_text="$2" current="$3"
+    local value
+    while true; do
+        read -rp "  ${prompt_text} [current: ${current:-none}]: " value
+        value="${value:-$current}"
+        [[ "$value" == "none" ]] && value=""
+        if [[ -z "$value" ]] || { [[ -f "$value" ]] && [[ "$value" != *[\|\&]* ]]; }; then
+            printf -v "$var_name" '%s' "$value"
+            return
+        fi
+        echo "  Not a readable file, or contains | or &. Enter a path, or 'none' to disable."
+    done
+}
+
 prompt_url() {
     local var_name="$1" prompt_text="$2"
     local value
