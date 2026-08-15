@@ -142,6 +142,14 @@ detect_local_references "$tmpd" >/dev/null
 detect_run_table "$tmpd" >/dev/null
 assert_eq "detect_local_references: local genome ignored for multi-species" "$FNA_FILE" ""
 
+# --example pins its own species, so a stray genome in the working directory
+# must never be adopted as the demo's reference.
+SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
+EXAMPLE_MODE=true
+detect_local_references "$tmpd" >/dev/null
+EXAMPLE_MODE=false
+assert_eq "detect_local_references: local genome refused in example mode" "$FNA_FILE" ""
+
 # A second RunTable is ambiguous and must abort.
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 touch "${tmpd}/other_RunTable.csv"

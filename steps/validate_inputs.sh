@@ -43,6 +43,15 @@ detect_local_references() {
         return 0
     fi
 
+    # --example pins a single species of its own, which is exactly the
+    # condition that would accept these files: any unrelated genome lying in
+    # the working directory would become the demo's reference.
+    if [[ "${EXAMPLE_MODE:-false}" == true ]]; then
+        echo "[WARN] Example mode ignores local FASTA/GTF files — the demo always"
+        echo "       uses its own reference."
+        return 0
+    fi
+
     if (( ${#fnas[@]} != 1 || ${#gtfs[@]} != 1 )); then
         echo "[WARN] Local override needs exactly 1 FASTA and 1 GTF (found ${#fnas[@]} and ${#gtfs[@]})."
         echo "       Ignoring local files; references will be downloaded instead."
