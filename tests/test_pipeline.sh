@@ -57,16 +57,6 @@ assert_succeeds() {
     fi
 }
 
-# --- normalize_layout --------------------------------------------------------
-assert_eq "PAIRED literal"    "$(normalize_layout PAIRED)"     "PAIRED"
-assert_eq "paired lowercase"  "$(normalize_layout paired)"     "PAIRED"
-assert_eq "PE"                "$(normalize_layout PE)"         "PAIRED"
-assert_eq "Paired-End"        "$(normalize_layout Paired-End)" "PAIRED"
-assert_eq "SINGLE literal"    "$(normalize_layout SINGLE)"     "SINGLE"
-assert_eq "SE"                "$(normalize_layout SE)"         "SINGLE"
-assert_eq "Single-End"        "$(normalize_layout Single-End)" "SINGLE"
-assert_fails "unknown layout" normalize_layout UNKNOWN
-
 # --- require_file ------------------------------------------------------------
 assert_fails "require_file missing" require_file "/no/such/file" ""
 

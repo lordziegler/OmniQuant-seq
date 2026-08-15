@@ -143,15 +143,3 @@ fetch_and_decompress() {
     fi
     return 0
 }
-
-# --- Parsing -----------------------------------------------------------------
-
-normalize_layout() {
-    local raw
-    raw="$(echo "$1" | tr '[:lower:]' '[:upper:]' | tr -d '\r' | sed 's/[-_]/ /g' | xargs)"
-    case "$raw" in
-        PAIRED|"PAIRED END"|PE) echo "PAIRED" ;;
-        SINGLE|"SINGLE END"|SE) echo "SINGLE" ;;
-        *) echo "[ABORT] Unknown library layout: '${1}'" >&2; return 1 ;;
-    esac
-}
