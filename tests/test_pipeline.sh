@@ -459,6 +459,26 @@ assert_eq "step_star: no --limitBAMsortRAM, the alignment does not sort" \
     "$(grep -c -- '--limitBAMsortRAM' "${PIPELINE_DIR}/steps/align.sh" || true)" "0"
 rm -rf "$tmpd"
 
+# --- setup.sh --species ------------------------------------------------------
+# A failed genome download must still exit non-zero, but not before printing
+# how to recover.
+tmpd="$(mktemp -d)"
+mkdir -p "${tmpd}/config" "${tmpd}/lib" "${tmpd}/steps"
+cp "${PIPELINE_DIR}/setup.sh" "$tmpd/"
+cp "${PIPELINE_DIR}"/config/*.sh "${tmpd}/config/"
+cp "${PIPELINE_DIR}"/lib/*.sh    "${tmpd}/lib/"
+cp "${PIPELINE_DIR}"/steps/*.sh  "${tmpd}/steps/"
+
+# toggle, delete, add one species with unreachable URLs, no more, write, fetch.
+species_status=0
+species_out="$( cd "$tmpd" && printf '\n\ny\nGenus_species\nhttp://127.0.0.1:1/g.fna.gz\nhttp://127.0.0.1:1/g.gtf.gz\ny\nn\ny\ny\n' \
+    | bash "${tmpd}/setup.sh" --species 2>&1 )" || species_status=$?
+assert_eq "setup --species: a failed download still exits non-zero" \
+    "$(( species_status != 0 ))" "1"
+assert_eq "setup --species: the next steps are printed even when a download fails" \
+    "$(grep -c 'Setup complete. Next steps' <<< "$species_out")" "1"
+rm -rf "$tmpd"
+
 # --- single-instance lock ----------------------------------------------------
 # A second run in the same directory must refuse to start instead of fighting
 # over sra/, fastq/ and the tracker.
