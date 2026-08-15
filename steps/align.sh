@@ -43,7 +43,6 @@ step_star() {
 
     STAR \
         --runThreadN          "$THREADS_STAR" \
-        --limitBAMsortRAM     "$(( MAX_MEMORY_GB * 1073741824 ))" \
         --genomeDir           "$STAR_INDEX" \
         --readFilesCommand    "$read_files_command" \
         --outFileNamePrefix   "$out_prefix" \

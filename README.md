@@ -319,7 +319,7 @@ works too.
 | `THREADS_TRIM` | `8` | BBDuk threads |
 | `THREADS_STAR` | `8` | STAR threads |
 | `THREADS_RSEM` | `8` | RSEM threads |
-| `MAX_MEMORY_GB` | `32` | STAR `--limitBAMsortRAM` |
+| `MAX_MEMORY_GB` | `32` | STAR `--limitGenomeGenerateRAM` at index build |
 | `MAX_SRA_SIZE` | `100G` | `prefetch --max-size` |
 | `DISK_WARN_GB` | `20` | Free-space warning threshold |
 | `SPECIES_FALLBACK` | `""` | Key for rows with no usable `Organism` |

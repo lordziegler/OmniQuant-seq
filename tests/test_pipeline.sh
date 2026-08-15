@@ -435,6 +435,30 @@ assert_eq "fetch_and_decompress: decompressed content" \
     "$(head -1 "${tmpd}/good.fa" 2>/dev/null)" ">chr1"
 rm -rf "$tmpd"
 
+# --- STAR memory budget ------------------------------------------------------
+# MAX_MEMORY_GB must reach the one STAR run that can exhaust the machine: the
+# index build. The alignment runs unsorted, where STAR ignores a RAM limit.
+tmpd="$(mktemp -d)"
+(
+    source "${PIPELINE_DIR}/steps/build_references.sh"
+    REFERENCES_DIR="${tmpd}/references"
+    LOG_DIR="${tmpd}/logs"
+    MAX_MEMORY_GB=8 THREADS_STAR=1 STAR_OVERHANG=99 STAR_SA_INDEX_NBASES=11
+    mkdir -p "$LOG_DIR"
+    fetch_species_references() { :; }
+    STAR() {
+        printf '%s\n' "$@" > "${tmpd}/star_args"
+        touch "${REFERENCES_DIR}/sp/STAR_genome_index/SA"
+    }
+    rsem-prepare-reference() { touch "${REFERENCES_DIR}/sp/rsem_ref.grp"; }
+    build_reference "sp|f|g|true"
+) >/dev/null 2>&1
+assert_eq "build_reference: MAX_MEMORY_GB reaches --limitGenomeGenerateRAM" \
+    "$(grep -A1 -x -- '--limitGenomeGenerateRAM' "${tmpd}/star_args" | tail -1)" "8589934592"
+assert_eq "step_star: no --limitBAMsortRAM, the alignment does not sort" \
+    "$(grep -c -- '--limitBAMsortRAM' "${PIPELINE_DIR}/steps/align.sh" || true)" "0"
+rm -rf "$tmpd"
+
 # --- single-instance lock ----------------------------------------------------
 # A second run in the same directory must refuse to start instead of fighting
 # over sra/, fastq/ and the tracker.

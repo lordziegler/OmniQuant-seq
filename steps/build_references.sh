@@ -46,15 +46,16 @@ build_reference() {
     fetch_species_references "$species" "$fna_url" "$gtf_url" \
         || die "Could not obtain reference files for ${species}."
 
-    echo "[STAR] Building genome index for ${species} (sjdbOverhang=${STAR_OVERHANG}, genomeSAindexNbases=${STAR_SA_INDEX_NBASES}) ..."
+    echo "[STAR] Building genome index for ${species} (sjdbOverhang=${STAR_OVERHANG}, genomeSAindexNbases=${STAR_SA_INDEX_NBASES}, RAM=${MAX_MEMORY_GB}G) ..."
     STAR \
-        --runThreadN          "$THREADS_STAR" \
-        --runMode             genomeGenerate \
-        --genomeDir           "$star_idx" \
-        --genomeFastaFiles    "$genome" \
-        --sjdbGTFfile         "$gtf" \
-        --sjdbOverhang        "$STAR_OVERHANG" \
-        --genomeSAindexNbases "$STAR_SA_INDEX_NBASES" \
+        --runThreadN             "$THREADS_STAR" \
+        --limitGenomeGenerateRAM "$(( MAX_MEMORY_GB * 1073741824 ))" \
+        --runMode                genomeGenerate \
+        --genomeDir              "$star_idx" \
+        --genomeFastaFiles       "$genome" \
+        --sjdbGTFfile            "$gtf" \
+        --sjdbOverhang           "$STAR_OVERHANG" \
+        --genomeSAindexNbases    "$STAR_SA_INDEX_NBASES" \
         2>&1 | tee "${LOG_DIR}/${species}_star_index.log"
     require_file "${star_idx}/SA" "STAR genomeGenerate failed — see ${LOG_DIR}/${species}_star_index.log"
 

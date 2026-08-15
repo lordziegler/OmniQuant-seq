@@ -55,7 +55,7 @@ configure_resources() {
 
     echo ""; echo " STAR alignment"
     prompt_int new_t_star "Threads (THREADS_STAR)"     "$THREADS_STAR"     1 "$max_cpus"
-    prompt_int new_mem    "RAM limit GB (MAX_MEMORY_GB — passed as --limitBAMsortRAM)" \
+    prompt_int new_mem    "RAM limit GB (MAX_MEMORY_GB — index build, --limitGenomeGenerateRAM)" \
                           "$MAX_MEMORY_GB" 1 "$avail_ram_gb"
 
     echo ""; echo " RSEM quantification"
@@ -405,12 +405,15 @@ EOF
 }
 
 main() {
+    # The closing message is what tells the user how to recover from a failed
+    # step, so it must print before the non-zero status propagates.
+    local status=0
     case "${1:-}" in
         "")               menu_main; return 0 ;;
         -i|--interactive) menu_main; return 0 ;;
         --resources)      configure_resources ;;
         --analysis)       configure_analysis ;;
-        --species)        configure_species ;;
+        --species)        configure_species || status=$? ;;
         --add-species)    add_species; return ;;
         -h|--help)        usage; return 0 ;;
         *)
@@ -428,6 +431,7 @@ main() {
     echo "   bash run.sh --test         # smoke test on your samples"
     echo "   bash run.sh --full         # full run"
     echo "========================================================"
+    return "$status"
 }
 
 main "$@"
