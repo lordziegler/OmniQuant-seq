@@ -369,7 +369,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 81 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 86 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -384,7 +384,7 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 81 passed, 0 failed.
+# Results: 86 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout
