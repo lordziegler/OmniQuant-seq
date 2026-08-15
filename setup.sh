@@ -260,7 +260,7 @@ configure_species() {
     echo " Enter the numbers of species to toggle ON/OFF (comma-separated),"
     echo " or press Enter to keep the current status."
     local toggle_input idx
-    read -rp " Toggle: " toggle_input
+    read -rp " Toggle: " toggle_input || toggle_input=""
     if [[ -n "$toggle_input" ]]; then
         local to_toggle=()
         read_species_indices to_toggle "$toggle_input"
@@ -277,7 +277,7 @@ configure_species() {
     echo " Enter the numbers of species to DELETE permanently (comma-separated),"
     echo " or press Enter to skip."
     local delete_input
-    read -rp " Delete: " delete_input
+    read -rp " Delete: " delete_input || delete_input=""
     if [[ -n "$delete_input" ]]; then
         local to_delete=()
         read_species_indices to_delete "$delete_input"

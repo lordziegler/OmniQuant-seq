@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # Interactive input helpers shared by setup.sh and lib/menu.sh.
 # Every helper validates and re-asks until the value is usable, so callers
-# never have to check what they read.
+# never have to check what they read. A closed stdin is not a usable answer
+# either: helpers with a current value fall back to it, and the two that have
+# none abort instead of looping forever on EOF.
 
 # Read an integer in [min, max]; empty input keeps the current value.
 prompt_int() {
     local var_name="$1" prompt_text="$2" current="$3" min="$4" max="$5"
     local value
+    # A config written on a larger machine must survive "press Enter to keep
+    # the current value", even when it exceeds what this host detects.
+    (( current > max )) && max="$current"
     while true; do
-        read -rp "  ${prompt_text} [current: ${current}, range: ${min}–${max}]: " value
+        read -rp "  ${prompt_text} [current: ${current}, range: ${min}–${max}]: " value \
+            || { printf -v "$var_name" '%s' "$current"; return; }
         value="${value:-$current}"
         if [[ "$value" =~ ^[0-9]+$ ]] && (( value >= min && value <= max )); then
             printf -v "$var_name" '%s' "$value"
@@ -22,7 +28,7 @@ prompt_int() {
 prompt_storage() {
     local var_name="$1" prompt_text="$2" current="$3"
     local value
-    read -rp "  ${prompt_text} [current: ${current}]: " value
+    read -rp "  ${prompt_text} [current: ${current}]: " value || value=""
     value="${value:-$current}"
     if [[ "$value" =~ ^[0-9]+(G|T|M)$ ]]; then
         printf -v "$var_name" '%s' "$value"
@@ -37,7 +43,8 @@ prompt_choice() {
     local var_name="$1" prompt_text="$2" current="$3"; shift 3
     local options=( "$@" ) value opt
     while true; do
-        read -rp "  ${prompt_text} [current: ${current}, options: ${options[*]}]: " value
+        read -rp "  ${prompt_text} [current: ${current}, options: ${options[*]}]: " value \
+            || { printf -v "$var_name" '%s' "$current"; return; }
         value="${value:-$current}"
         for opt in "${options[@]}"; do
             [[ "$value" == "$opt" ]] || continue
@@ -54,7 +61,8 @@ prompt_path() {
     local var_name="$1" prompt_text="$2" current="$3"
     local value
     while true; do
-        read -rp "  ${prompt_text} [current: ${current:-none}]: " value
+        read -rp "  ${prompt_text} [current: ${current:-none}]: " value \
+            || { printf -v "$var_name" '%s' "$current"; return; }
         value="${value:-$current}"
         [[ "$value" == "none" ]] && value=""
         if [[ -z "$value" ]] || { [[ -f "$value" ]] && [[ "$value" != *[\|\&]* ]]; }; then
@@ -69,7 +77,8 @@ prompt_url() {
     local var_name="$1" prompt_text="$2"
     local value
     while true; do
-        read -rp "  ${prompt_text}: " value
+        read -rp "  ${prompt_text}: " value \
+            || die "No input available for '${prompt_text}' — stdin is closed."
         if [[ "$value" =~ ^https?://[^[:space:]]+$ ]]; then
             printf -v "$var_name" '%s' "$value"
             return
@@ -85,7 +94,8 @@ prompt_species_key() {
     local var_name="$1" prompt_text="$2"
     local value
     while true; do
-        read -rp "  ${prompt_text}: " value
+        read -rp "  ${prompt_text}: " value \
+            || die "No input available for '${prompt_text}' — stdin is closed."
         value="${value// /_}"
         if [[ "$value" =~ ^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+$ ]]; then
             printf -v "$var_name" '%s' "$value"
@@ -98,6 +108,6 @@ prompt_species_key() {
 
 confirm() {
     local answer
-    read -rp " $1 [y/N]: " answer
+    read -rp " $1 [y/N]: " answer || answer=""
     [[ "$answer" =~ ^[Yy]$ ]]
 }

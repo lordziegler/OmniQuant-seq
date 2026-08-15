@@ -138,7 +138,12 @@ process_sample() {
 # Walk samples.tsv up to PIPELINE_RETRY_PASSES times; samples already marked
 # complete in the tracker are skipped, so an interrupted run resumes cleanly.
 run_sample_loop() {
-    local pass srr species layout
+    local pass srr species layout line
+    local rows=()
+
+    # The table is read up front: a stage that consumes stdin (prefetch, STAR)
+    # would otherwise eat the remaining lines of the loop's input.
+    mapfile -t rows < "$SAMPLES_TSV"
 
     for (( pass = 1; pass <= PIPELINE_RETRY_PASSES; pass++ )); do
         echo ""
@@ -146,7 +151,8 @@ run_sample_loop() {
         echo " Pass ${pass}/${PIPELINE_RETRY_PASSES}"
         echo "============================================================"
 
-        while IFS=$'\t' read -r srr species layout; do
+        for line in "${rows[@]}"; do
+            IFS=$'\t' read -r srr species layout <<< "$line"
             [[ "$srr" == "SRR" || -z "$srr" ]] && continue
 
             if tracker_is_complete "$srr"; then
@@ -157,6 +163,6 @@ run_sample_loop() {
             echo ""
             echo "--- ${srr} | ${species} | ${layout} ---"
             process_sample "$srr" "$species" "$layout"
-        done < "$SAMPLES_TSV"
+        done
     done
 }

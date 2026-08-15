@@ -61,7 +61,7 @@ disk_usage() {
     used="$(du -sh . 2>/dev/null | cut -f1)"
     avail="$(df -BG . 2>/dev/null | awk 'NR==2{ gsub("G","",$4); print $4 }')"
     echo "[DISK] ${label} | used: ${used} | free: ${avail}G"
-    if [[ -n "$avail" ]] && (( avail < DISK_WARN_GB )); then
+    if [[ "$avail" =~ ^[0-9]+$ ]] && (( avail < DISK_WARN_GB )); then
         echo "[WARN] Free space (${avail}G) below threshold (${DISK_WARN_GB}G)."
     fi
 }
@@ -120,6 +120,14 @@ fetch_and_decompress() {
                 return 1
             }
         fi
+    fi
+
+    # A truncated archive decompresses into a silently incomplete genome, so it
+    # is verified before use — whether we downloaded it or the user supplied it.
+    if ! gzip -t "$src" 2>/dev/null; then
+        [[ "$src" == "$local_gz" ]] || rm -f "$src"
+        echo "[ERROR] Corrupt gzip archive: ${src}" >&2
+        return 1
     fi
 
     echo "[DECOMPRESS] ${src##*/} -> ${dest##*/}"

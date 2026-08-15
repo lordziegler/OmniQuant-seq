@@ -13,10 +13,10 @@ DISK_WARN_GB=20
 
 # --- Paths -------------------------------------------------------------------
 REFERENCES_DIR="references"
-SAMPLES_TSV="results/samples.tsv"
 LOG_DIR="logs"
 TMP_DIR="tmp"
 RESULTS_DIR="results"
+SAMPLES_TSV="${RESULTS_DIR}/samples.tsv"
 
 # --- RunTable parsing --------------------------------------------------------
 # Species keys come from the RunTable's Organism field (Genus species ->

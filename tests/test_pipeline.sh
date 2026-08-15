@@ -14,6 +14,7 @@ trap 'rm -rf "$LOG_DIR"' EXIT
 
 source "${PIPELINE_DIR}/lib/utils.sh"
 source "${PIPELINE_DIR}/lib/species_config.sh"
+source "${PIPELINE_DIR}/lib/prompt.sh"
 source "${PIPELINE_DIR}/lib/menu.sh"
 source "${PIPELINE_DIR}/steps/validate_inputs.sh"
 source "${PIPELINE_DIR}/steps/parse_samples.sh"
@@ -105,6 +106,31 @@ assert_eq "species_config save/load: gtf"    "${SP_GTF[0]}"    "b.gtf.gz"
 assert_eq "species_config save/load: active" "${SP_ACTIVE[0]}" "false"
 assert_eq "species_config_index: absent key" "$(species_config_index Nope)" "-1"
 rm -rf "$tmpd"
+
+# --- prompt helpers ----------------------------------------------------------
+# A piped or redirected run reaches EOF: helpers with a current value must keep
+# it instead of aborting the whole setup or re-asking forever.
+prompt_int p_threads "Threads" 8 1 16 </dev/null
+assert_eq "prompt_int: EOF keeps the current value" "$p_threads" "8"
+
+prompt_storage p_size "Max size" "100G" </dev/null
+assert_eq "prompt_storage: EOF keeps the current value" "$p_size" "100G"
+
+prompt_choice p_qtrim "Trim mode" "rl" rl r l f </dev/null
+assert_eq "prompt_choice: EOF keeps the current value" "$p_qtrim" "rl"
+
+prompt_path p_adapters "Adapters" "" </dev/null
+assert_eq "prompt_path: EOF keeps the current value" "$p_adapters" ""
+
+# A config written on a larger machine must survive "press Enter to keep it".
+prompt_int p_ram "RAM" 32 1 7 <<< ""
+assert_eq "prompt_int: Enter keeps a current value above the detected maximum" \
+    "$p_ram" "32"
+
+# Without a current value there is nothing to fall back to, so EOF must abort
+# with a message rather than re-ask forever.
+assert_fails "prompt_url: EOF aborts instead of looping" \
+    bash -c "source '${PIPELINE_DIR}/lib/utils.sh'; source '${PIPELINE_DIR}/lib/prompt.sh'; prompt_url u 'URL' </dev/null"
 
 # --- input detection ----------------------------------------------------------
 # One active species: a local FASTA + GTF override the download URLs.
@@ -386,6 +412,63 @@ assert_eq "failure cleanup: records the failed stage" \
     "$(awk -F'\t' 'NR>1{print $1"/"$7}' "$SUMMARY_FILE")" "SRR2/FAILED"
 rm -rf "$tmpd"
 unset RESULTS_DIR TMP_DIR RAW_1 RAW_2 RAW_SE CLEAN_1 CLEAN_2 CLEAN_SE SINGLETONS
+
+# --- reference integrity -----------------------------------------------------
+# A truncated archive must never reach gunzip: it would produce a silently
+# incomplete genome.
+tmpd="$(mktemp -d)"
+printf 'not gzip at all' > "${tmpd}/broken.fna.gz"
+assert_fails "fetch_and_decompress: rejects a corrupt archive" \
+    fetch_and_decompress "${tmpd}/genome.fa" "" "file:///dev/null"
+assert_eq "fetch_and_decompress: corrupt archive left no output" \
+    "$([[ -f "${tmpd}/genome.fa" ]] && echo yes || echo no)" "no"
+
+# A user-supplied archive is never deleted, even when it is the corrupt one.
+assert_fails "fetch_and_decompress: rejects a corrupt local archive" \
+    fetch_and_decompress "${tmpd}/g2.fa" "${tmpd}/broken.fna.gz" ""
+assert_eq "fetch_and_decompress: user-supplied archive is kept" \
+    "$([[ -f "${tmpd}/broken.fna.gz" ]] && echo yes || echo no)" "yes"
+
+# A valid archive still goes through.
+printf '>chr1\nACGT\n' | gzip > "${tmpd}/good.fna.gz"
+assert_succeeds "fetch_and_decompress: accepts a valid archive" \
+    fetch_and_decompress "${tmpd}/good.fa" "${tmpd}/good.fna.gz" ""
+assert_eq "fetch_and_decompress: decompressed content" \
+    "$(head -1 "${tmpd}/good.fa" 2>/dev/null)" ">chr1"
+rm -rf "$tmpd"
+
+# --- single-instance lock ----------------------------------------------------
+# A second run in the same directory must refuse to start instead of fighting
+# over sra/, fastq/ and the tracker.
+if command -v flock &>/dev/null; then
+    tmpd="$(mktemp -d)"
+    mkdir -p "${tmpd}/tmp"
+    exec 201>"${tmpd}/tmp/pipeline.lock"
+    flock -n 201
+    lock_out="$( cd "$tmpd" && bash "${PIPELINE_DIR}/run.sh" --build-refs 2>&1 )" || true
+    exec 201>&-
+    assert_eq "run.sh: refuses to start while another run holds the lock" \
+        "$(grep -c 'already running (lock:' <<< "$lock_out")" "1"
+    rm -rf "$tmpd"
+fi
+
+# --- run_sample_loop ---------------------------------------------------------
+# Every sample must be visited even when a stage consumes stdin: the loop reads
+# samples.tsv up front instead of redirecting it into the stage commands.
+tmpd="$(mktemp -d)"
+printf 'SRR\tSPECIES\tLAYOUT\nA\tsp\tPAIRED\nB\tsp\tSINGLE\nC\tsp\tPAIRED\n' \
+    > "${tmpd}/samples.tsv"
+loop_seen="$(
+    source "${PIPELINE_DIR}/steps/process_sample.sh"
+    SAMPLES_TSV="${tmpd}/samples.tsv"
+    PIPELINE_RETRY_PASSES=1
+    log_step() { :; }
+    tracker_is_complete() { return 1; }
+    process_sample() { echo "seen:$1"; cat >/dev/null; }
+    run_sample_loop </dev/null | grep -c '^seen:'
+)" || true
+assert_eq "run_sample_loop: visits every sample when a stage reads stdin" "$loop_seen" "3"
+rm -rf "$tmpd"
 
 # --- Syntax ------------------------------------------------------------------
 syntax_errors=0

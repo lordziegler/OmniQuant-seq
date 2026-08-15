@@ -18,7 +18,8 @@ _BBDUK_RE = re.compile(
 def expression_matrix(rsem_dir: Path, output: Path) -> None:
     files = sorted(rsem_dir.glob("*/*.genes.results"))
     if not files:
-        print(f"[WARN] No genes.results in {rsem_dir}"); return
+        print(f"[WARN] No genes.results in {rsem_dir}")
+        return
 
     sample_data: dict = {}
     gene_ann:    dict = {}
@@ -31,7 +32,8 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
             reader = csv.DictReader(fh, delimiter="\t")
             needed = set(_BASE + ["TPM", "FPKM"])
             if needed - set(reader.fieldnames or []):
-                print(f"[WARN] Skipping {f} — missing columns."); continue
+                print(f"[WARN] Skipping {f} — missing columns.")
+                continue
             for row in reader:
                 g = row["gene_id"]
                 gene_ann.setdefault(g, [row[c] for c in _BASE])
@@ -41,7 +43,8 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
             gene_sets.append(set(rows))
 
     if not sample_data:
-        print("[WARN] No valid samples."); return
+        print("[WARN] No valid samples.")
+        return
 
     common  = sorted(set.intersection(*gene_sets))
     samples = sorted(sample_data)
@@ -61,7 +64,8 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
 def star_qc(log_dir: Path, output: Path) -> None:
     files = sorted(log_dir.glob("*_STAR_Log.final.out"))
     if not files:
-        print("[WARN] No STAR Log.final.out files found."); return
+        print("[WARN] No STAR Log.final.out files found.")
+        return
 
     metrics_order: list = []
     data: dict = {}
@@ -92,7 +96,8 @@ def star_qc(log_dir: Path, output: Path) -> None:
 def bbduk_qc(log_dir: Path, output: Path) -> None:
     files = sorted(log_dir.glob("*_bbduk.log"))
     if not files:
-        print("[WARN] No BBDuk logs found."); return
+        print("[WARN] No BBDuk logs found.")
+        return
 
     fields = ["Sample",
               "Input_reads", "Input_bases",
