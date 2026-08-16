@@ -1,11 +1,11 @@
 name: omniquant-seq
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
   - defaults
 dependencies:
-  - python>=3.9
-  - sra-tools=3.0.0
+  - python=3.11
+  - sra-tools=3.4.1
   - fastqc=0.12.1
   - multiqc=1.14
   - bbmap=39.81
