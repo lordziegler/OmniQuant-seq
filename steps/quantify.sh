@@ -16,6 +16,7 @@ step_rsem() {
         --alignments
         --num-threads      "$THREADS_RSEM"
         --temporary-folder "$rsem_tmp"
+        --forward-prob     "${FORWARD_PROB:-0.5}"
     )
     [[ "$layout" == "PAIRED" ]] && base_args+=( --paired-end )
 

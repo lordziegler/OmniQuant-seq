@@ -61,6 +61,23 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
     print(f"[DONE] Expression matrix: {output}  ({len(common)} genes, {len(samples)} samples)")
 
 
+def _strand_ratio(log_dir: Path, sample: str) -> str:
+    """fwd/(fwd+rev) from STAR's ReadsPerGene.out.tab (--quantMode GeneCounts),
+    columns 3/4 after the 4 header rows. Same value used to set RSEM's
+    --forward-prob at quantification time (see steps/align.sh:_infer_strandedness)."""
+    f = log_dir / f"{sample}_STAR_ReadsPerGene.out.tab"
+    if not f.exists():
+        return "NA"
+    fwd = rev = 0
+    for line in f.read_text(errors="ignore").splitlines()[4:]:
+        cols = line.split("\t")
+        if len(cols) < 4:
+            continue
+        fwd += int(cols[2])
+        rev += int(cols[3])
+    return f"{fwd / (fwd + rev):.3f}" if fwd + rev else "NA"
+
+
 def star_qc(log_dir: Path, output: Path) -> None:
     files = sorted(log_dir.glob("*_STAR_Log.final.out"))
     if not files:
@@ -81,7 +98,9 @@ def star_qc(log_dir: Path, output: Path) -> None:
             if k not in metrics_order:
                 metrics_order.append(k)
             metrics[k] = v.strip()
+        metrics["strand_ratio (fwd/(fwd+rev))"] = _strand_ratio(log_dir, sample)
         data[sample] = metrics
+    metrics_order.append("strand_ratio (fwd/(fwd+rev))")
 
     samples = sorted(data)
     output.parent.mkdir(parents=True, exist_ok=True)
