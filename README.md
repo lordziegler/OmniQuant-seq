@@ -51,13 +51,13 @@ bash run.sh --full       # production run
 
 | Stage | Tool | Version | Output |
 |:--|:--|:--|:--|
-| Download | SRA-Toolkit (`prefetch`, `fastq-dump`, `fasterq-dump`) | 3.0.0 | `.sra` → FASTQ |
+| Download | SRA-Toolkit (`prefetch`, `fastq-dump`, `fasterq-dump`) | 3.4.1 | `.sra` → FASTQ |
 | Quality | FastQC | 0.12.1 | Per-sample QC, before and after trimming |
 | Trimming | BBDuk (BBMap) | 39.81 | Quality-trimmed FASTQ |
 | Alignment | STAR | 2.7.10a | Genome BAM + transcriptome BAM |
-| Quantification | RSEM | 1.3.3 | `genes.results`, `isoforms.results` |
-| QC report | MultiQC | 1.14 | Per-sample and global reports |
-| Aggregation | Python + openpyxl | ≥ 3.9 / ≥ 3.0 | Expression matrix + QC matrices |
+| Quantification | RSEM | 1.3.3 (`--version` banner reports 1.3.1 — upstream string lag, not a version mismatch) | `genes.results`, `isoforms.results` |
+| QC report | MultiQC | 1.14 (needs `setuptools<81`, pinned in `environment.yml`) | Per-sample and global reports |
+| Aggregation | Python + openpyxl | 3.11 / 3.1.5, both pinned exactly | Expression matrix + QC matrices |
 
 All pinned in `environment.yml`. Reference downloads use `curl` or `wget`,
 whichever is present. `flock` (util-linux) is used for the run lock when
@@ -109,24 +109,28 @@ flag that already implements it, so the two can never drift apart.
 bash run.sh --example
 ```
 
-One paired-end *H. armigera* run, `SRR29271587`
-([PRJNA1119665](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1119665)), capped
-at 25,000 spots, with the species forced regardless of what `config/species.sh`
-has active. It goes through every stage and keeps the intermediates, so each
-one can be inspected.
+Two paired-end *H. armigera* runs from the same BioProject, `SRR29271587` and
+`SRR29271588`
+([PRJNA1119665](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1119665)), each
+capped at 25,000 spots, with the species forced regardless of what
+`config/species.sh` has active. It goes through every stage and keeps the
+intermediates, so each one can be inspected — and because there are two
+samples, `gene_expression_matrix.tsv` demonstrates a real inner join, not a
+single-sample table.
 
 ```
-results/tables/gene_expression_matrix.tsv        TPM + FPKM for SRR29271587
+results/tables/gene_expression_matrix.tsv        TPM + FPKM, inner-joined across both runs
 results/tables/STAR_mapping_QC_matrix.tsv        STAR Log.final.out metrics
 results/tables/BBDUK_preprocessing_QC_matrix.tsv BBDuk trimming stats
-results/rsem/Helicoverpa_armigera/               gene- and isoform-level results
+results/rsem/Helicoverpa_armigera/               gene- and isoform-level results, one set per run
 results/qc/multiqc/                              per-sample and global reports
-results/pipeline_sample_summary.tsv              one row, all stages OK
-logs/SRR29271587.log                             per-stage log
+results/pipeline_sample_summary.tsv              2 rows, all stages OK
+logs/SRR29271587.log, logs/SRR29271588.log       per-stage logs
 ```
 
-> Small, not instant: `prefetch` still pulls the whole ~620 MB archive, and the
-> STAR/RSEM index is built first if missing (~10 GB, tens of minutes).
+> Small, not instant: `prefetch` still pulls both whole SRA archives
+> (~1.5 GB total), and the STAR/RSEM index is built first if missing
+> (~10 GB, tens of minutes).
 
 ---
 
@@ -369,7 +373,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 86 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 101 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -384,14 +388,19 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 86 passed, 0 failed.
+# Results: 101 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout
 normalisation, the species config module, RunTable and local-genome detection,
-`parse_runtable.py` including `--species` and `--fallback`, both `--help`
-screens and unknown-flag rejection, the interactive menu, the matrix preview,
-the partial-output cleanup on failure, and `bash -n` over every script.
+`parse_runtable.py` including `--species`, `--fallback`, `--allow-genomic-source`,
+`--assume-layout` and `--star-overhang`, `build_matrix.py`'s strand-ratio
+column and its inner join across samples (using real Helicoverpa armigera
+accessions and GCF_030705265.1 gene/transcript IDs, so a reader can see the
+join keeps only genes shared by every sample), reference checksum
+verification, both `--help` screens and
+unknown-flag rejection, the interactive menu, the matrix preview, the
+partial-output cleanup on failure, and `bash -n` over every script.
 
 ---
 

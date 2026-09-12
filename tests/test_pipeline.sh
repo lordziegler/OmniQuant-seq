@@ -241,8 +241,67 @@ fb_sp="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/fallback.tsv" 2>/dev/null || true
 assert_eq "parse_runtable: --fallback assigns key when Organism is empty" "$fb_sp" "My_species"
 rm -rf "$tmpd"
 
+# GENOMIC is excluded by default and only admitted behind --allow-genomic-source.
+tmpd="$(mktemp -d)"
+cat > "${tmpd}/genomic.csv" <<'CSV'
+Run,Assay Type,LibrarySource,LibraryLayout,Organism
+SRR600001,RNA-Seq,GENOMIC,PAIRED,Helicoverpa armigera
+CSV
+
+python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/genomic.csv" --output "${tmpd}/genomic.tsv" >/dev/null 2>&1 || true
+gen_rows="0"
+[[ -f "${tmpd}/genomic.tsv" ]] && gen_rows="$(awk 'NR>1' "${tmpd}/genomic.tsv" | wc -l | tr -d ' ')"
+assert_eq "parse_runtable: GENOMIC excluded by default" "$gen_rows" "0"
+
+python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/genomic.csv" --output "${tmpd}/genomic.tsv" \
+    --allow-genomic-source >/dev/null 2>&1
+gen_rows2="$(awk 'NR>1' "${tmpd}/genomic.tsv" 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+assert_eq "parse_runtable: --allow-genomic-source admits it" "$gen_rows2" "1"
+rm -rf "$tmpd"
+
+# An unresolvable layout is excluded, not silently assigned PAIRED, unless the
+# caller opts in with --assume-layout.
+tmpd="$(mktemp -d)"
+cat > "${tmpd}/nolayout.csv" <<'CSV'
+Run,Assay Type,LibrarySource,LibraryLayout,Organism
+SRR700001,RNA-Seq,TRANSCRIPTOMIC,,Helicoverpa armigera
+CSV
+
+python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/nolayout.csv" --output "${tmpd}/nolayout.tsv" >/dev/null 2>&1 || true
+nl_rows="0"
+[[ -f "${tmpd}/nolayout.tsv" ]] && nl_rows="$(awk 'NR>1' "${tmpd}/nolayout.tsv" | wc -l | tr -d ' ')"
+assert_eq "parse_runtable: unresolved layout excluded by default" "$nl_rows" "0"
+
+python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/nolayout.csv" --output "${tmpd}/nolayout.tsv" \
+    --assume-layout SINGLE >/dev/null 2>&1
+nl_layout="$(awk -F'\t' 'NR==2{print $3}' "${tmpd}/nolayout.tsv" 2>/dev/null || true)"
+assert_eq "parse_runtable: --assume-layout includes it with the given layout" "$nl_layout" "SINGLE"
+rm -rf "$tmpd"
+
+# --star-overhang warns without altering the output.
+tmpd="$(mktemp -d)"
+cat > "${tmpd}/spotlen.csv" <<'CSV'
+Run,Assay Type,LibrarySource,LibraryLayout,Organism,AvgSpotLen
+SRR800001,RNA-Seq,TRANSCRIPTOMIC,SINGLE,Helicoverpa armigera,300
+CSV
+
+overhang_out="$(python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/spotlen.csv" --output "${tmpd}/spotlen.tsv" \
+    --star-overhang 99 2>&1)"
+assert_eq "parse_runtable: --star-overhang warns on mismatched read length" \
+    "$(grep -qi "far from STAR_OVERHANG" <<< "$overhang_out" && echo yes || echo no)" "yes"
+ov_rows="$(awk 'NR>1' "${tmpd}/spotlen.tsv" 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+assert_eq "parse_runtable: --star-overhang keeps the sample" "$ov_rows" "1"
+rm -rf "$tmpd"
+
 # --- Bundled example RunTable ------------------------------------------------
-# run.sh --example depends on this file parsing to exactly one usable sample.
+# run.sh --example depends on this file parsing to exactly 2 usable samples,
+# both Helicoverpa_armigera/PAIRED, so the demo's expression matrix exercises
+# a real inner join across samples.
 tmpd="$(mktemp -d)"
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 RUN_TABLE="${PIPELINE_DIR}/examples/SraRunTable.example.csv"
@@ -250,11 +309,13 @@ SAMPLES_TSV="${tmpd}/samples.tsv"
 parse_samples >/dev/null 2>&1 || true
 
 ex_rows="$(awk 'NR>1' "$SAMPLES_TSV" 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
-assert_eq "example RunTable: 1 sample" "$ex_rows" "1"
+assert_eq "example RunTable: 2 samples" "$ex_rows" "2"
 assert_eq "example RunTable: species"  \
-    "$(awk -F'\t' 'NR==2{print $2}' "$SAMPLES_TSV" 2>/dev/null || true)" "Helicoverpa_armigera"
+    "$(awk -F'\t' 'NR>1{print $2}' "$SAMPLES_TSV" 2>/dev/null | sort -u | tr '\n' ',' || true)" \
+    "Helicoverpa_armigera,"
 assert_eq "example RunTable: layout"   \
-    "$(awk -F'\t' 'NR==2{print $3}' "$SAMPLES_TSV" 2>/dev/null || true)" "PAIRED"
+    "$(awk -F'\t' 'NR>1{print $3}' "$SAMPLES_TSV" 2>/dev/null | sort -u | tr '\n' ',' || true)" \
+    "PAIRED,"
 rm -rf "$tmpd"
 unset RUN_TABLE SAMPLES_TSV
 
@@ -277,6 +338,65 @@ ps_sp="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/samples.tsv" 2>/dev/null || true)
 assert_eq "parse_samples: kept the active species" "$ps_sp" "Helicoverpa_armigera"
 rm -rf "$tmpd"
 unset SPECIES_CONFIG RUN_TABLE SAMPLES_TSV
+
+# --- build_matrix.py: strand_ratio from STAR's GeneCounts output, and the ---
+# --- inner join across samples in the expression matrix ---------------------
+# Synthetic fixtures on purpose — this is a fast offline unit test, not a
+# demonstration on real data. The real 3-sample demo lives in
+# examples/SraRunTable.example.csv, run via `bash run.sh --example`.
+tmpd="$(mktemp -d)"
+mkdir -p "${tmpd}/logs" "${tmpd}/rsem/SRR1" "${tmpd}/rsem/SRR2"
+cat > "${tmpd}/logs/SRR1_STAR_Log.final.out" <<'LOG'
+                                 Number of input reads |	1000
+LOG
+cat > "${tmpd}/logs/SRR1_STAR_ReadsPerGene.out.tab" <<'TAB'
+N_unmapped	0	0	0
+N_multimapping	0	0	0
+N_noFeature	0	0	0
+N_ambiguous	0	0	0
+gene1	100	90	10
+gene2	100	90	10
+TAB
+
+# Two samples with partially overlapping gene sets: geneA is SRR1-only,
+# geneD is SRR2-only, geneB/geneC are shared. Only the shared genes must
+# survive the inner join in expression_matrix().
+cat > "${tmpd}/rsem/SRR1/SRR1.genes.results" <<'TSV'
+gene_id	transcript_id(s)	length	effective_length	expected_count	TPM	FPKM
+geneA	geneA_t1	1000	900	10	5.0	6.0
+geneB	geneB_t1	1000	900	20	15.0	16.0
+geneC	geneC_t1	1000	900	30	25.0	26.0
+TSV
+cat > "${tmpd}/rsem/SRR2/SRR2.genes.results" <<'TSV'
+gene_id	transcript_id(s)	length	effective_length	expected_count	TPM	FPKM
+geneB	geneB_t1	1000	900	40	35.0	36.0
+geneC	geneC_t1	1000	900	50	45.0	46.0
+geneD	geneD_t1	1000	900	60	55.0	56.0
+TSV
+
+python3 "${PIPELINE_DIR}/helpers/build_matrix.py" \
+    --rsem-dir "${tmpd}/rsem" --output "${tmpd}/expr.tsv" \
+    --star-logs "${tmpd}/logs" --bbduk-logs "${tmpd}/logs" \
+    --star-out "${tmpd}/star_qc.tsv" --bbduk-out "${tmpd}/bbduk_qc.tsv" >/dev/null 2>&1
+
+sr_val="$(awk -F'\t' '$1 ~ /strand_ratio/ {print $2}' "${tmpd}/star_qc.tsv" 2>/dev/null || true)"
+assert_eq "build_matrix: strand_ratio = fwd/(fwd+rev)" "$sr_val" "0.900"
+
+assert_eq "build_matrix: header lists both samples' TPM/FPKM columns" \
+    "$(head -1 "${tmpd}/expr.tsv")" \
+    "$(printf 'gene_id\ttranscript_id(s)\tlength\teffective_length\texpected_count\tSRR1_TPM\tSRR1_FPKM\tSRR2_TPM\tSRR2_FPKM')"
+
+expr_rows="$(awk 'NR>1' "${tmpd}/expr.tsv" | wc -l | tr -d ' ')"
+assert_eq "build_matrix: inner join keeps only the 2 shared genes" "$expr_rows" "2"
+
+expr_genes="$(awk -F'\t' 'NR>1{print $1}' "${tmpd}/expr.tsv" | paste -sd, -)"
+assert_eq "build_matrix: inner join drops the sample-exclusive genes" "$expr_genes" "geneB,geneC"
+
+geneC_row="$(awk -F'\t' '$1=="geneC"' "${tmpd}/expr.tsv")"
+assert_eq "build_matrix: shared gene keeps its per-sample TPM/FPKM values" \
+    "$geneC_row" "$(printf 'geneC\tgeneC_t1\t1000\t900\t30\t25.0\t26.0\t45.0\t46.0')"
+
+rm -rf "$tmpd"
 
 # --- CLI ---------------------------------------------------------------------
 # --help must work without any external tool installed, so it has to be handled
@@ -433,6 +553,28 @@ assert_succeeds "fetch_and_decompress: accepts a valid archive" \
     fetch_and_decompress "${tmpd}/good.fa" "${tmpd}/good.fna.gz" ""
 assert_eq "fetch_and_decompress: decompressed content" \
     "$(head -1 "${tmpd}/good.fa" 2>/dev/null)" ">chr1"
+rm -rf "$tmpd"
+
+# --- checksum verification against a published md5checksums.txt (M9) --------
+tmpd="$(mktemp -d)"
+mkdir -p "${tmpd}/src" "${tmpd}/out"
+printf '>chr1\nACGT\n' | gzip > "${tmpd}/src/genome.fna.gz"
+good_md5="$(md5sum "${tmpd}/src/genome.fna.gz" | awk '{print $1}')"
+printf '%s  ./genome.fna.gz\n' "$good_md5" > "${tmpd}/src/md5checksums.txt"
+
+assert_succeeds "fetch_and_decompress: verifies a matching checksum" \
+    fetch_and_decompress "${tmpd}/out/genome.fa" "" "file://${tmpd}/src/genome.fna.gz"
+assert_eq "fetch_and_decompress: content survives checksum verification" \
+    "$(head -1 "${tmpd}/out/genome.fa" 2>/dev/null)" ">chr1"
+rm -rf "${tmpd}/out"; mkdir -p "${tmpd}/out"
+
+# The archive changes after its checksum was published — must be rejected,
+# not silently decompressed as a wrong-but-valid-gzip genome.
+printf '>chr1\nTTTT\n' | gzip > "${tmpd}/src/genome.fna.gz"
+assert_fails "fetch_and_decompress: rejects a checksum mismatch" \
+    fetch_and_decompress "${tmpd}/out/genome.fa" "" "file://${tmpd}/src/genome.fna.gz"
+assert_eq "fetch_and_decompress: mismatch left no output" \
+    "$([[ -f "${tmpd}/out/genome.fa" ]] && echo yes || echo no)" "no"
 rm -rf "$tmpd"
 
 # --- STAR memory budget ------------------------------------------------------

@@ -26,8 +26,9 @@ source "${PIPELINE_DIR}/steps/quantify.sh"
 source "${PIPELINE_DIR}/steps/process_sample.sh"
 source "${PIPELINE_DIR}/steps/postprocess.sh"
 
-# Reference dataset shipped with the repository: one small paired-end
-# Helicoverpa armigera RNA-seq run (~620 MB SRA, 10.5 M spots).
+# Reference dataset shipped with the repository: two paired-end
+# Helicoverpa armigera RNA-seq runs from the same BioProject (~1.5 GB SRA
+# total), so the demo's expression matrix demonstrates a real inner join.
 # EXAMPLE_SPECIES and EXAMPLE_READS come from config/pipeline.sh.
 EXAMPLE_RUN_TABLE="${PIPELINE_DIR}/examples/SraRunTable.example.csv"
 
@@ -47,8 +48,8 @@ Modes:
                  (${TEST_READS}) reads each. Use to validate a setup.
   --full         Full pipeline on all reads. Production run.
   --example      Self-contained demo on ${EXAMPLE_SPECIES}, using
-                 examples/SraRunTable.example.csv (1 paired-end run) and
-                 ${EXAMPLE_READS} reads. Runs every stage — prefetch,
+                 examples/SraRunTable.example.csv (2 paired-end runs) and
+                 ${EXAMPLE_READS} reads each. Runs every stage — prefetch,
                  fastq-dump, FastQC, BBDuk, STAR, RSEM, matrices — and keeps
                  the intermediate files so each stage can be inspected. The
                  ${EXAMPLE_SPECIES} references are built first if
