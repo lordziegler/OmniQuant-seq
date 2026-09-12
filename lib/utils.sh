@@ -98,6 +98,38 @@ download_file() {
     mv "$part" "$dest"
 }
 
+# Best-effort integrity check against NCBI's md5checksums.txt, published in
+# the same FTP directory as the reference file. Sources that do not publish
+# one (a non-NCBI URL) are not blocked — gzip -t below still catches
+# truncation; this only adds protection against a truncated-but-valid-gzip or
+# silently wrong file (M9).
+_verify_md5() {
+    local src="$1" url="$2"
+    local base="${url%/*}" fname="${url##*/}"
+    local sums
+    sums="$(dirname "$src")/md5checksums.txt"
+
+    download_file "${base}/md5checksums.txt" "$sums" 2>/dev/null || {
+        echo "[WARN] No md5checksums.txt at ${base} — skipping checksum verification."
+        return 0
+    }
+
+    local expected
+    expected="$(grep -E "[[:space:]]\.?/?${fname}\$" "$sums" | awk '{print $1}' | head -1)"
+    if [[ -z "$expected" ]]; then
+        echo "[WARN] ${fname} not listed in md5checksums.txt — skipping checksum verification."
+        return 0
+    fi
+
+    local actual
+    actual="$(md5sum "$src" | awk '{print $1}')"
+    if [[ "$actual" != "$expected" ]]; then
+        echo "[ERROR] Checksum mismatch for ${fname}: expected ${expected}, got ${actual}." >&2
+        return 1
+    fi
+    echo "[OK] Checksum verified: ${fname}"
+}
+
 # Produce the decompressed $dest from, in order of preference:
 #   1. $dest itself, if it already exists (idempotent re-runs);
 #   2. $local_gz, a gzip file already on disk — never deleted, it may be an
@@ -111,7 +143,7 @@ fetch_and_decompress() {
         return 0
     fi
 
-    local src="$local_gz"
+    local src="$local_gz" downloaded=false
     if [[ -z "$src" || ! -f "$src" ]]; then
         src="${dest}.gz"
         if [[ ! -f "$src" ]]; then
@@ -119,7 +151,15 @@ fetch_and_decompress() {
                 echo "[ERROR] Download failed: ${url}" >&2
                 return 1
             }
+            downloaded=true
         fi
+    fi
+
+    # Checksum verification only applies to files this run downloaded — a
+    # user-supplied local_gz is trusted as-is, and requiring internet access
+    # to use one would break offline/manual-reference usage.
+    if [[ "$downloaded" == true && -n "$url" ]]; then
+        _verify_md5 "$src" "$url" || { rm -f "$src"; return 1; }
     fi
 
     # A truncated archive decompresses into a silently incomplete genome, so it
