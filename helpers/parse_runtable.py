@@ -86,6 +86,18 @@ def main() -> None:
                    help="Comma-separated Genus_species keys to keep (e.g. "
                         "'Helicoverpa_armigera,Danio_rerio'). Others are dropped. "
                         "Omit to keep every organism found.")
+    p.add_argument("--allow-genomic-source", action="store_true",
+                   help="Also accept LibrarySource=GENOMIC rows. By default only "
+                        "TRANSCRIPTOMIC is accepted; GENOMIC is a DNA-seq source and "
+                        "rarely appropriate for an RNA-seq abundance workflow.")
+    p.add_argument("--assume-layout", choices=["PAIRED", "SINGLE"], default=None,
+                   help="Layout to assign to a row whose LibraryLayout is missing or "
+                        "unrecognized. Omit to exclude such rows instead (safer default "
+                        "than silently guessing PAIRED).")
+    p.add_argument("--star-overhang", type=int, default=None,
+                   help="STAR_OVERHANG in use for the shared index (sjdbOverhang). When "
+                        "given, warns about samples whose AvgSpotLen is far from "
+                        "overhang+1, since one index serves every run of a species.")
     args = p.parse_args()
 
     allowed = ({s.strip() for s in args.species.split(",") if s.strip()}
@@ -101,12 +113,18 @@ def main() -> None:
               if _get(r, "Assay Type", "AssayType", "assay_type") == "RNA-Seq"]
     print(f"[INFO] After RNA-Seq filter: {len(rnaseq)}")
 
-    sourced = [r for r in rnaseq
-               if _get(r, "LibrarySource", "Library Source", "library_source")
-               in {"TRANSCRIPTOMIC", "GENOMIC"}]
-    if not sourced:
-        print("[WARN] No records passed LibrarySource filter — using all RNA-Seq rows.")
+    allowed_sources = {"TRANSCRIPTOMIC"} | ({"GENOMIC"} if args.allow_genomic_source else set())
+    has_source = [r for r in rnaseq
+                  if _get(r, "LibrarySource", "Library Source", "library_source")]
+    if not has_source:
+        print("[WARN] LibrarySource field not found or empty — using all RNA-Seq rows.")
         sourced = rnaseq
+    else:
+        sourced = [r for r in has_source
+                   if _get(r, "LibrarySource", "Library Source", "library_source") in allowed_sources]
+        if not sourced:
+            print(f"[WARN] No records matched LibrarySource {sorted(allowed_sources)} — "
+                  f"0 samples retained. Pass --allow-genomic-source to also accept GENOMIC.")
 
     mapped = []
     for r in sourced:
@@ -123,8 +141,26 @@ def main() -> None:
         seen.add(srr)
         layout = _layout(_get(r, "LibraryLayout", "Library Layout", "library_layout"))
         if not layout:
-            print(f"[WARN] Unknown layout for {srr} — defaulting to PAIRED.")
-            layout = "PAIRED"
+            if args.assume_layout:
+                layout = args.assume_layout
+                print(f"[WARN] Unknown layout for {srr} — assuming {layout} (--assume-layout).")
+            else:
+                print(f"[WARN] Unknown layout for {srr} — excluded. Re-run with "
+                      f"--assume-layout PAIRED|SINGLE to include it.")
+                continue
+
+        if args.star_overhang is not None:
+            avg_len_raw = _get(r, "AvgSpotLen", "avg_spot_len")
+            expected = args.star_overhang + 1
+            try:
+                avg_len = float(avg_len_raw)
+                if avg_len and not (0.5 * expected <= avg_len <= 2 * expected):
+                    print(f"[WARN] {srr}: AvgSpotLen={avg_len:.0f} nt is far from "
+                          f"STAR_OVERHANG+1={expected} nt — the shared per-species index "
+                          f"may be poorly matched for this run's read length.")
+            except ValueError:
+                pass
+
         clean.append({"SRR": srr, "SPECIES": r["_sp"], "LAYOUT": layout})
 
     if not clean:

@@ -14,6 +14,7 @@ parse_samples() {
     local args=( --input "$RUN_TABLE" --output "$SAMPLES_TSV" )
     [[ -n "$active_keys" ]] && args+=( --species "$active_keys" )
     [[ -n "${SPECIES_FALLBACK:-}" ]] && args+=( --fallback "$SPECIES_FALLBACK" )
+    [[ -n "${STAR_OVERHANG:-}" ]] && args+=( --star-overhang "$STAR_OVERHANG" )
 
     python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" "${args[@]}"
 
