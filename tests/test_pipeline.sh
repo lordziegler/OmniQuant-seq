@@ -654,6 +654,22 @@ loop_seen="$(
 assert_eq "run_sample_loop: visits every sample when a stage reads stdin" "$loop_seen" "3"
 rm -rf "$tmpd"
 
+# --- BBDuk trimming ----------------------------------------------------------
+source "${PIPELINE_DIR}/steps/trim.sh"
+
+# BBTools 39.81 hangs instead of failing when its threaded FASTQ reader asserts
+# on a header-carrying "+" line, so the assertion must stay disabled.
+assert_eq "step_bbduk: BBDuk runs with assertions disabled" \
+    "${BBDUK_JVM_ARGS[*]}" "-da"
+
+tmpd="$(mktemp -d)"
+touch "${tmpd}/a" "${tmpd}/b"
+assert_succeeds "_files_present: true when every file exists" \
+    _files_present "${tmpd}/a" "${tmpd}/b"
+assert_fails "_files_present: false when one file is missing" \
+    _files_present "${tmpd}/a" "${tmpd}/missing"
+rm -rf "$tmpd"
+
 # --- Syntax ------------------------------------------------------------------
 syntax_errors=0
 while IFS= read -r script; do

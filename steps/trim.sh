@@ -2,6 +2,15 @@
 # Quality trimming with BBDuk.
 # On success sets globals: CLEAN_1, CLEAN_2, CLEAN_SE (and SINGLETONS for PE).
 
+# BBTools 39.81 launches the JVM with assertions enabled, and its multithreaded
+# FASTQ reader — the one it picks from t>=12 on — asserts that the third line of
+# every record is a bare "+". Both fastq-dump and fasterq-dump repeat the read
+# header there, which is valid FASTQ, so each reader thread dies on its first
+# record and BBDuk then blocks forever on an input queue nobody fills: no error,
+# no exit code, the run just stops after the BBDUK line. Turning the assertion
+# off leaves the parsing itself untouched.
+BBDUK_JVM_ARGS=( -da )
+
 # Build the BBDuk key=value arguments into the array BBDUK_ARGS. Adapter
 # clipping is only requested when BBDUK_REF names an adapter FASTA; all values
 # come from config/pipeline.sh.
@@ -14,6 +23,14 @@ _build_bbduk_args() {
     [[ -n "${BBDUK_HDIST:-}" ]] && BBDUK_ARGS+=( "hdist=${BBDUK_HDIST}" )
     BBDUK_ARGS+=( "qtrim=${BBDUK_QTRIM}" "trimq=${BBDUK_TRIMQ}" "minlen=${BBDUK_MINLEN}" )
     return 0
+}
+
+# True only when every path given exists.
+_files_present() {
+    local path
+    for path in "$@"; do
+        [[ -f "$path" ]] || return 1
+    done
 }
 
 step_bbduk() {
@@ -38,26 +55,25 @@ step_bbduk() {
         io_args=( "in=${RAW_SE}" "out=${CLEAN_SE}" )
     fi
 
-    local missing=false path
-    for path in "${expected[@]}"; do
-        [[ -f "$path" ]] || missing=true
-    done
-
-    if [[ "$missing" == true ]]; then
-        log_step "$srr" "BBDUK" "Trimming ${layout} reads (qtrim=${BBDUK_QTRIM}, trimq=${BBDUK_TRIMQ}, minlen=${BBDUK_MINLEN}) ..."
-        bbduk.sh \
-            "${io_args[@]}" \
-            "t=${THREADS_TRIM}" \
-            "${BBDUK_ARGS[@]}" \
-            2>&1 | tee "${LOG_DIR}/${srr}_bbduk.log"
-    else
+    if _files_present "${expected[@]}"; then
         log_step "$srr" "BBDUK" "Clean ${layout} FASTQ already present — skipping."
+        return 0
     fi
 
-    for path in "${expected[@]}"; do
-        if [[ ! -f "$path" ]]; then
-            log_step "$srr" "ERROR" "BBDuk failed — missing ${path}. See: ${LOG_DIR}/${srr}_bbduk.log"
-            return 1
-        fi
-    done
+    log_step "$srr" "BBDUK" "Trimming ${layout} reads (qtrim=${BBDUK_QTRIM}, trimq=${BBDUK_TRIMQ}, minlen=${BBDUK_MINLEN}) ..."
+    bbduk.sh \
+        "${BBDUK_JVM_ARGS[@]}" \
+        "${io_args[@]}" \
+        "t=${THREADS_TRIM}" \
+        "${BBDUK_ARGS[@]}" \
+        2>&1 | tee "${LOG_DIR}/${srr}_bbduk.log"
+    local status="${PIPESTATUS[0]}"
+
+    # BBDuk opens its gzip outputs before it reads a single record, so finding
+    # them on disk does not mean the trimming finished — only the exit status
+    # does. Without this check a crashed run hands empty FASTQ to STAR.
+    if (( status != 0 )) || ! _files_present "${expected[@]}"; then
+        log_step "$srr" "ERROR" "BBDuk failed (exit ${status}). See: ${LOG_DIR}/${srr}_bbduk.log"
+        return 1
+    fi
 }
