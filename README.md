@@ -343,6 +343,7 @@ works too.
 | `PIPELINE_RETRY_PASSES` | `3` | Passes over the sample list |
 | `STAR_OVERHANG` | `99` | `sjdbOverhang`, read length − 1 |
 | `STAR_SA_INDEX_NBASES` | `12` | `genomeSAindexNbases`, lower for small genomes |
+| `MIN_UNIQUE_MAPPED_PCT` | `10` | A sample whose uniquely mapped reads fall below this % fails at STAR instead of reaching the matrix (e.g. small-RNA libraries catalogued as RNA-Seq) |
 | `BBDUK_QTRIM` / `BBDUK_TRIMQ` / `BBDUK_MINLEN` | `rl` / `10` / `36` | Trimming direction, threshold, minimum length |
 | `BBDUK_REF` | `""` | Adapter FASTA; empty disables adapter clipping |
 | `EXAMPLE_SPECIES` / `EXAMPLE_READS` | `Helicoverpa_armigera` / `25000` | Used by `--example` |
@@ -385,7 +386,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 120 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 122 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -400,7 +401,7 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 120 passed, 0 failed.
+# Results: 122 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout

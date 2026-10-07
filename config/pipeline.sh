@@ -35,6 +35,8 @@ PREVIEW_LINES=10
 
 STAR_OVERHANG=99
 STAR_SA_INDEX_NBASES=12
+# Below this % of uniquely mapped reads a sample fails (e.g. small-RNA libraries).
+MIN_UNIQUE_MAPPED_PCT=10
 
 BBDUK_QTRIM="rl"
 BBDUK_TRIMQ=10

@@ -59,6 +59,17 @@ step_star() {
         cp "${out_prefix}Log.final.out" "${LOG_DIR}/${srr}_STAR_Log.final.out"
     fi
 
+    # Small-RNA libraries catalogued as RNA-Seq align almost nothing; keep
+    # them out of the matrix instead of reporting them as OK.
+    # ponytail: retried like any failed stage; mark it final if retries cost too much.
+    local unique min="${MIN_UNIQUE_MAPPED_PCT:-10}"
+    unique="$(awk -F'|' '/Uniquely mapped reads %/ {gsub(/[ \t%]/, "", $2); print $2}' \
+        "${out_prefix}Log.final.out" 2>/dev/null)"
+    if [[ -n "$unique" ]] && awk -v u="$unique" -v m="$min" 'BEGIN { exit !(u < m) }'; then
+        log_step "$srr" "ERROR" "Only ${unique}% of reads mapped uniquely (MIN_UNIQUE_MAPPED_PCT=${min}): not an mRNA library? See ${LOG_DIR}/${srr}_STAR_Log.final.out"
+        return 1
+    fi
+
     _infer_strandedness "$srr" "${out_prefix}ReadsPerGene.out.tab"
 
     log_step "$srr" "STAR" "BAM: ${BAM_PATH}"

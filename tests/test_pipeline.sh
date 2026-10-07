@@ -669,6 +669,22 @@ assert_eq "_infer_strandedness: 0.9 is forward-stranded"  "$(strand_case 90 10)"
 assert_eq "_infer_strandedness: 0.8 stays unstranded"     "$(strand_case 80 20)" "0.800/0.5"
 assert_eq "_infer_strandedness: 0.1 is reverse-stranded"  "$(strand_case 10 90)" "0.100/0"
 assert_eq "_infer_strandedness: no counts leaves defaults" "$(strand_case 0 0)"  "NA/0.5"
+
+star_case() {
+    (
+        TMP_DIR="$tmpd" THREADS_STAR=1 STAR_INDEX=x CLEAN_SE="${tmpd}/r.fq" MIN_UNIQUE_MAPPED_PCT=10
+        pct="$1"
+        disk_usage() { :; }
+        STAR() {
+            touch "${tmpd}/S_star/Aligned.toTranscriptome.out.bam"
+            printf '                        Uniquely mapped reads %% |\t%s%%\n' "$pct" \
+                > "${tmpd}/S_star/Log.final.out"
+        }
+        step_star S SINGLE >/dev/null 2>&1 && echo pass || echo fail
+    )
+}
+assert_eq "step_star: a sample mapping 0% fails (small-RNA library)" "$(star_case 0.00)" "fail"
+assert_eq "step_star: a sample mapping 85% passes" "$(star_case 85.20)" "pass"
 rm -rf "$tmpd"
 
 source "${PIPELINE_DIR}/steps/trim.sh"
