@@ -56,6 +56,15 @@ Modes:
                  they do not exist yet.
 
 Options:
+  --manual SRR[,SRR...]
+                     Process only these accessions from the RunTable, e.g. to
+                     retry a failed sample or analyse a single one. Repeatable;
+                     combine with --test or --full. Species, layout and
+                     metadata still come from the RunTable, and an accession
+                     missing from it (or filtered out) aborts the run. The
+                     list is written to results/samples.manual.tsv, so the
+                     full results/samples.tsv is left untouched. Samples the
+                     tracker already marks complete are still skipped.
   -i, --interactive  Show the menu even when other arguments are given.
   --no-preview       Do not print the expression matrix preview at the end.
   -h, --help         Show this message.
@@ -66,6 +75,7 @@ Examples:
   bash run.sh --build-refs         # indexes only, once per species
   bash run.sh --test               # smoke test on your samples
   bash run.sh --full --no-preview  # production run, quiet ending
+  bash run.sh --full --manual SRR10345445   # one sample only
   bash setup.sh --add-species      # add an organism + fetch its genome
 
 With no mode and no terminal attached (cron, cluster job), the pipeline runs
@@ -95,6 +105,7 @@ EOF
 BUILD_REFS_ONLY=false
 EXAMPLE_MODE=false
 FORCE_MENU=false
+MANUAL_RUNS=""
 NO_ARGS=false
 [[ $# -eq 0 ]] && NO_ARGS=true
 
@@ -105,6 +116,9 @@ while [[ $# -gt 0 ]]; do
         --build-refs)    BUILD_REFS_ONLY=true; shift ;;
         --example)       EXAMPLE_MODE=true;    shift ;;
         --no-preview)    ENABLE_PREVIEW=false; shift ;;
+        --manual)
+            [[ $# -ge 2 && "$2" != -* ]] || die "--manual needs an accession list, e.g. --manual SRR10345445,SRR10345446"
+            MANUAL_RUNS+="${MANUAL_RUNS:+,}$2"; shift 2 ;;
         -i|--interactive) FORCE_MENU=true;     shift ;;
         -h|--help)       usage; exit 0 ;;
         *)
@@ -162,6 +176,10 @@ trap on_interrupt SIGINT SIGTERM
 RUN_MODE="quantify"
 [[ "$BUILD_REFS_ONLY" == true ]] && RUN_MODE="build-refs"
 [[ "$EXAMPLE_MODE"    == true ]] && RUN_MODE="example"
+if [[ -n "$MANUAL_RUNS" ]]; then
+    RUN_MODE+=" (manual: ${MANUAL_RUNS})"
+    SAMPLES_TSV="${RESULTS_DIR}/samples.manual.tsv"
+fi
 
 echo "============================================================"
 echo " OmniQuant-seq — RNA-seq expression pipeline"

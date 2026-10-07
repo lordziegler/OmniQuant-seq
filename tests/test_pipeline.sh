@@ -340,6 +340,24 @@ assert_eq "parse_runtable: metadata skips placeholders and fills NA" \
     "Gut|ILLUMINA|PRJNA579505|NA"
 rm -rf "$tmpd"
 
+# --runs (behind run.sh --manual) keeps only the named accessions, and aborts
+# on one that is absent rather than silently processing nothing.
+tmpd="$(mktemp -d)"
+cat > "${tmpd}/runs.csv" <<'CSV'
+Run,Assay Type,LibrarySource,LibraryLayout,Organism
+SRR910001,RNA-Seq,TRANSCRIPTOMIC,PAIRED,Helicoverpa armigera
+SRR910002,RNA-Seq,TRANSCRIPTOMIC,SINGLE,Helicoverpa armigera
+SRR910003,WGS,GENOMIC,PAIRED,Helicoverpa armigera
+CSV
+python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/runs.csv" --output "${tmpd}/runs.tsv" --runs srr910002 >/dev/null 2>&1 || true
+assert_eq "parse_runtable: --runs keeps only the named accession" \
+    "$(awk -F'\t' 'NR>1{print $1"/"$3}' "${tmpd}/runs.tsv" 2>/dev/null)" "SRR910002/SINGLE"
+assert_fails "parse_runtable: --runs aborts on an accession filtered out" \
+    python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/runs.csv" --output "${tmpd}/runs2.tsv" --runs SRR910001,SRR910003
+rm -rf "$tmpd"
+
 # --- Bundled example RunTable ------------------------------------------------
 # run.sh --example depends on this file parsing to exactly 2 usable samples,
 # both Helicoverpa_armigera/PAIRED, so the demo's expression matrix exercises
@@ -444,11 +462,12 @@ rm -rf "$tmpd"
 # --help must work without any external tool installed, so it has to be handled
 # before the pre-flight check.
 run_help="$(bash "${PIPELINE_DIR}/run.sh" --help)"
-for flag in --build-refs --test --full --example --interactive --no-preview; do
+for flag in --build-refs --test --full --example --manual --interactive --no-preview; do
     assert_eq "run.sh --help documents ${flag}" \
         "$(grep -q -- "$flag" <<< "$run_help" && echo yes || echo no)" "yes"
 done
 assert_fails "run.sh rejects unknown flags" bash "${PIPELINE_DIR}/run.sh" --nope
+assert_fails "run.sh --manual needs an accession list" bash "${PIPELINE_DIR}/run.sh" --manual --full
 assert_succeeds "setup.sh --help" bash "${PIPELINE_DIR}/setup.sh" --help
 assert_fails "setup.sh rejects unknown flags" bash "${PIPELINE_DIR}/setup.sh" --nope
 

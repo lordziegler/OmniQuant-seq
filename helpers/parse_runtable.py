@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 ACCESSION_RE = re.compile(r"^[SED]RR\d+$")
+RUN_KEYS = ("Run", "Run Accession", "RunAccession", "Accession")
 
 # Sample-sheet columns written after LAYOUT, each mapped to the RunTable fields
 # it may come from; the first informative one wins. Submitters spread the same
@@ -127,8 +128,14 @@ def main() -> None:
                    help="STAR_OVERHANG in use for the shared index (sjdbOverhang). When "
                         "given, warns about samples whose AvgSpotLen is far from "
                         "overhang+1, since one index serves every run of a species.")
+    p.add_argument("--runs", default=None,
+                   help="Comma-separated accessions to keep (e.g. 'SRR10345445,SRR10345446'), "
+                        "to retry or analyse single samples. Each one must pass the filters "
+                        "above, or the run aborts naming it.")
     args = p.parse_args()
 
+    wanted = ({s.strip().upper() for s in args.runs.split(",") if s.strip()}
+              if args.runs else None)
     allowed = ({s.strip() for s in args.species.split(",") if s.strip()}
                if args.species else None)
 
@@ -137,6 +144,10 @@ def main() -> None:
 
     all_rows = _load(args.input)
     print(f"[INFO] RunTable loaded: {len(all_rows)} records.")
+    if wanted:
+        all_rows = [r for r in all_rows
+                    if _get(r, *RUN_KEYS).replace("\r", "") in wanted]
+        print(f"[INFO] After --runs filter: {len(all_rows)}")
 
     rnaseq = [r for r in all_rows
               if _get(r, "Assay Type", "AssayType", "assay_type") == "RNA-Seq"]
@@ -164,7 +175,7 @@ def main() -> None:
     seen:  set   = set()
     clean: list  = []
     for r in mapped:
-        srr = _get(r, "Run", "Run Accession", "RunAccession", "Accession").replace("\r", "")
+        srr = _get(r, *RUN_KEYS).replace("\r", "")
         if not ACCESSION_RE.match(srr) or srr in seen:
             continue
         seen.add(srr)
@@ -193,6 +204,12 @@ def main() -> None:
         clean.append({"SRR": srr, "SPECIES": r["_sp"], "LAYOUT": layout,
                       **{col: _meta(r, keys) for col, keys in METADATA.items()}})
 
+    # A requested accession that silently drops out would leave the user
+    # believing it was processed.
+    missing = sorted(wanted - {r["SRR"] for r in clean}) if wanted else []
+    if missing:
+        sys.exit(f"[ABORT] --runs: not in the RunTable or excluded by the filters "
+                 f"above: {', '.join(missing)}")
     if not clean:
         sys.exit("[ABORT] No valid RNA-Seq samples found.")
 

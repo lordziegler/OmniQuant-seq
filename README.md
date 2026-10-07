@@ -79,6 +79,7 @@ top of `steps/align.sh`.
 | `--test` | Every sample, capped at `TEST_READS` reads each |
 | `--full` | Every sample, all reads |
 | `--example` | Bundled demo, see below |
+| `--manual SRR[,SRR...]` | Only these accessions from the RunTable — retry a failed sample or analyse one on its own. Combine with `--test`/`--full` |
 | `-i`, `--interactive` | Force the menu even with other arguments |
 | `--no-preview` | Skip the matrix preview at the end |
 | `-h`, `--help` | Usage, current defaults, output locations |
@@ -209,6 +210,13 @@ needs: `TISSUE`, `PLATFORM`, `INSTRUMENT`, `BIOPROJECT`, `DEV_STAGE`, `SEX`,
 `TREATMENT`. Each one takes the first informative value among the RunTable
 fields submitters use for it (`tissue`, `tissue_type`, `Organism_part`, …);
 empty cells and INSDC placeholders such as `missing` become `NA`.
+
+`run.sh --manual SRR10345445,SRR10345446` passes the list as `--runs`: the
+same filters apply, an accession that is absent or filtered out aborts the run
+instead of being silently skipped, and the result goes to
+`results/samples.manual.tsv`, so the full `samples.tsv` is not overwritten.
+Samples the tracker already marks complete are still skipped; the matrices are
+rebuilt from every result in `results/rsem/`, not only the manual ones.
 
 Worth reviewing before a full run. To produce it on its own:
 
@@ -378,7 +386,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 110 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 114 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -393,13 +401,13 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 110 passed, 0 failed.
+# Results: 114 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout
 normalisation, the species config module, RunTable and local-genome detection,
 `parse_runtable.py` including `--species`, `--fallback`, `--allow-genomic-source`,
-`--assume-layout` and `--star-overhang`, `build_matrix.py`'s strand-ratio
+`--assume-layout`, `--star-overhang` and `--runs`, `build_matrix.py`'s strand-ratio
 column and its inner join across samples (using real Helicoverpa armigera
 accessions and GCF_030705265.1 gene/transcript IDs, so a reader can see the
 join keeps only genes shared by every sample), reference checksum

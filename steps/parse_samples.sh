@@ -15,6 +15,7 @@ parse_samples() {
     [[ -n "$active_keys" ]] && args+=( --species "$active_keys" )
     [[ -n "${SPECIES_FALLBACK:-}" ]] && args+=( --fallback "$SPECIES_FALLBACK" )
     [[ -n "${STAR_OVERHANG:-}" ]] && args+=( --star-overhang "$STAR_OVERHANG" )
+    [[ -n "${MANUAL_RUNS:-}" ]] && args+=( --runs "$MANUAL_RUNS" )
 
     python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" "${args[@]}"
 
