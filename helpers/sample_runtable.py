@@ -18,7 +18,7 @@ Z95 = 1.96
 
 
 def cochran(population: int, margin: float = 0.05, p: float = 0.5) -> int:
-    n0 = Z95 ** 2 * p * (1 - p) / margin ** 2
+    n0 = Z95**2 * p * (1 - p) / margin**2
     return min(population, math.ceil(n0 / (1 + (n0 - 1) / population)))
 
 
@@ -33,13 +33,25 @@ def overhang(mate_lengths: list, coverage: float = 0.95) -> int:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--runtable", required=True, type=Path)
-    p.add_argument("--samples",  required=True, type=Path,
-                   help="samples.tsv from parse_runtable.py: the population.")
-    p.add_argument("--output",   default=Path("pilot_SraRunTable.csv"), type=Path,
-                   help="Pilot RunTable, usable as run.sh input in its own directory.")
-    p.add_argument("--margin",   default=0.05, type=float,
-                   help="Margin of error at 95%% confidence (default 0.05).")
-    p.add_argument("--seed",     default=1, type=int)
+    p.add_argument(
+        "--samples",
+        required=True,
+        type=Path,
+        help="samples.tsv from parse_runtable.py: the population.",
+    )
+    p.add_argument(
+        "--output",
+        default=Path("pilot_SraRunTable.csv"),
+        type=Path,
+        help="Pilot RunTable, usable as run.sh input in its own directory.",
+    )
+    p.add_argument(
+        "--margin",
+        default=0.05,
+        type=float,
+        help="Margin of error at 95%% confidence (default 0.05).",
+    )
+    p.add_argument("--seed", default=1, type=int)
     args = p.parse_args()
 
     by_run = {_get(r, *RUN_KEYS): r for r in _load(args.runtable)}
@@ -54,7 +66,9 @@ def main() -> None:
             mate = float(spot) / (2 if s["LAYOUT"] == "PAIRED" else 1)
             population.append((row, mate))
     if not population:
-        raise SystemExit("[ABORT] No run in samples.tsv has an AvgSpotLen in the RunTable.")
+        raise SystemExit(
+            "[ABORT] No run in samples.tsv has an AvgSpotLen in the RunTable."
+        )
 
     n = cochran(len(population), args.margin)
     pilot = random.Random(args.seed).sample(population, n)
@@ -67,9 +81,13 @@ def main() -> None:
         w.writeheader()
         w.writerows(r for r, _ in pilot)
 
-    print(f"[INFO] Population N = {len(population)}"
-          + (f"  ({skipped} runs without AvgSpotLen excluded)" if skipped else ""))
-    print(f"[INFO] Sample size n = {n}  (95% CI, margin ±{args.margin:.0%}, seed {args.seed})")
+    print(
+        f"[INFO] Population N = {len(population)}"
+        + (f"  ({skipped} runs without AvgSpotLen excluded)" if skipped else "")
+    )
+    print(
+        f"[INFO] Sample size n = {n}  (95% CI, margin ±{args.margin:.0%}, seed {args.seed})"
+    )
     print(f"[DONE] Pilot RunTable: {args.output}")
     print(f"STAR_OVERHANG (pilot)  = {pilot_oh}  -> covers {covered:.1%} of all runs")
     print(f"STAR_OVERHANG (census) = {overhang(census)}")

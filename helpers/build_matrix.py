@@ -22,7 +22,7 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
         return
 
     sample_data: dict = {}
-    gene_ann:    dict = {}
+    gene_ann: dict = {}
 
     needed = {*_BASE, "TPM", "FPKM"}
     for f in files:
@@ -44,7 +44,7 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
         print("[WARN] No valid samples.")
         return
 
-    common  = sorted(set.intersection(*map(set, sample_data.values())))
+    common = sorted(set.intersection(*map(set, sample_data.values())))
     samples = sorted(sample_data)
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +56,9 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
             for s in samples:
                 row += list(sample_data[s][g])
             w.writerow(row)
-    print(f"[DONE] Expression matrix: {output}  ({len(common)} genes, {len(samples)} samples)")
+    print(
+        f"[DONE] Expression matrix: {output}  ({len(common)} genes, {len(samples)} samples)"
+    )
 
 
 def _strand_ratio(log_dir: Path, sample: str) -> str:
@@ -86,7 +88,7 @@ def star_qc(log_dir: Path, output: Path) -> None:
     data: dict = {}
 
     for f in files:
-        sample  = f.name.replace("_STAR_Log.final.out", "")
+        sample = f.name.replace("_STAR_Log.final.out", "")
         metrics: dict = {}
         for line in f.read_text(errors="ignore").splitlines():
             if "|" not in line:
@@ -116,12 +118,23 @@ def bbduk_qc(log_dir: Path, output: Path) -> None:
         print("[WARN] No BBDuk logs found.")
         return
 
-    fields = ["Sample",
-              "Input_reads", "Input_bases",
-              "QTrimmed_reads", "QTrimmed_reads_percent", "QTrimmed_bases", "QTrimmed_bases_percent",
-              "Total_Removed_reads", "Total_Removed_reads_percent",
-              "Total_Removed_bases", "Total_Removed_bases_percent",
-              "Result_reads", "Result_reads_percent", "Result_bases", "Result_bases_percent"]
+    fields = [
+        "Sample",
+        "Input_reads",
+        "Input_bases",
+        "QTrimmed_reads",
+        "QTrimmed_reads_percent",
+        "QTrimmed_bases",
+        "QTrimmed_bases_percent",
+        "Total_Removed_reads",
+        "Total_Removed_reads_percent",
+        "Total_Removed_bases",
+        "Total_Removed_bases_percent",
+        "Result_reads",
+        "Result_reads_percent",
+        "Result_bases",
+        "Result_bases_percent",
+    ]
     rows = []
     for f in files:
         d = dict.fromkeys(fields, "NA")
@@ -133,10 +146,12 @@ def bbduk_qc(log_dir: Path, output: Path) -> None:
             lbl = m.group("label").replace(" ", "_")
             # BBDuk reports no percentage for the Input line — it is the 100%
             # baseline — so those columns do not exist. Only fill known ones.
-            for column, value in ((f"{lbl}_reads", m.group("reads")),
-                                  (f"{lbl}_bases", m.group("bases")),
-                                  (f"{lbl}_reads_percent", m.group("rpct")),
-                                  (f"{lbl}_bases_percent", m.group("bpct"))):
+            for column, value in (
+                (f"{lbl}_reads", m.group("reads")),
+                (f"{lbl}_bases", m.group("bases")),
+                (f"{lbl}_reads_percent", m.group("rpct")),
+                (f"{lbl}_bases_percent", m.group("bpct")),
+            ):
                 if column in d:
                     d[column] = value or "NA"
         rows.append(d)
@@ -151,11 +166,11 @@ def bbduk_qc(log_dir: Path, output: Path) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--rsem-dir",  required=True, type=Path)
-    p.add_argument("--output",    required=True, type=Path)
+    p.add_argument("--rsem-dir", required=True, type=Path)
+    p.add_argument("--output", required=True, type=Path)
     p.add_argument("--star-logs", required=True, type=Path)
-    p.add_argument("--bbduk-logs",required=True, type=Path)
-    p.add_argument("--star-out",  required=True, type=Path)
+    p.add_argument("--bbduk-logs", required=True, type=Path)
+    p.add_argument("--star-out", required=True, type=Path)
     p.add_argument("--bbduk-out", required=True, type=Path)
     args = p.parse_args()
 
