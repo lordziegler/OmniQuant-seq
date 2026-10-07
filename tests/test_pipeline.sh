@@ -323,6 +323,23 @@ ov_rows="$(awk 'NR>1' "${tmpd}/spotlen.tsv" 2>/dev/null | wc -l | tr -d ' ' || e
 assert_eq "parse_runtable: --star-overhang keeps the sample" "$ov_rows" "1"
 rm -rf "$tmpd"
 
+# Sample metadata: a placeholder in the first alias falls through to the next,
+# and an empty field becomes NA so the TSV never has empty cells.
+tmpd="$(mktemp -d)"
+cat > "${tmpd}/meta.csv" <<'CSV'
+Run,Assay Type,LibrarySource,LibraryLayout,Organism,tissue,tissue_type,Platform,BioProject,sex
+SRR900001,RNA-Seq,TRANSCRIPTOMIC,PAIRED,Helicoverpa armigera,missing,Gut,ILLUMINA,PRJNA579505,
+CSV
+python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/meta.csv" --output "${tmpd}/meta.tsv" >/dev/null 2>&1 || true
+assert_eq "parse_runtable: sample-sheet header" \
+    "$(head -1 "${tmpd}/meta.tsv" 2>/dev/null)" \
+    "$(printf 'SRR\tSPECIES\tLAYOUT\tTISSUE\tPLATFORM\tINSTRUMENT\tBIOPROJECT\tDEV_STAGE\tSEX\tTREATMENT')"
+assert_eq "parse_runtable: metadata skips placeholders and fills NA" \
+    "$(awk -F'\t' 'NR==2{print $4"|"$5"|"$7"|"$9}' "${tmpd}/meta.tsv" 2>/dev/null)" \
+    "Gut|ILLUMINA|PRJNA579505|NA"
+rm -rf "$tmpd"
+
 # --- Bundled example RunTable ------------------------------------------------
 # run.sh --example depends on this file parsing to exactly 2 usable samples,
 # both Helicoverpa_armigera/PAIRED, so the demo's expression matrix exercises
@@ -677,6 +694,19 @@ loop_seen="$(
     run_sample_loop </dev/null | grep -c '^seen:'
 )" || true
 assert_eq "run_sample_loop: visits every sample when a stage reads stdin" "$loop_seen" "3"
+
+# Metadata columns after LAYOUT must not leak into the layout argument.
+printf 'SRR\tSPECIES\tLAYOUT\tTISSUE\nA\tsp\tPAIRED\tGut\n' > "${tmpd}/samples.tsv"
+loop_layout="$(
+    source "${PIPELINE_DIR}/steps/process_sample.sh"
+    SAMPLES_TSV="${tmpd}/samples.tsv"
+    PIPELINE_RETRY_PASSES=1
+    log_step() { :; }
+    tracker_is_complete() { return 1; }
+    process_sample() { echo "layout:$3"; }
+    run_sample_loop </dev/null | grep '^layout:'
+)" || true
+assert_eq "run_sample_loop: metadata columns do not leak into layout" "$loop_layout" "layout:PAIRED"
 rm -rf "$tmpd"
 
 # --- BBDuk trimming ----------------------------------------------------------

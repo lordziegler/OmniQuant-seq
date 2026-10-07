@@ -152,7 +152,9 @@ run_sample_loop() {
         echo "============================================================"
 
         for line in "${rows[@]}"; do
-            IFS=$'\t' read -r srr species layout <<< "$line"
+            # Trailing `_` swallows the metadata columns; without it they
+            # would land in $layout and a PAIRED run would be read as SINGLE.
+            IFS=$'\t' read -r srr species layout _ <<< "$line"
             [[ "$srr" == "SRR" || -z "$srr" ]] && continue
 
             if tracker_is_complete "$srr"; then

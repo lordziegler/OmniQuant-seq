@@ -204,7 +204,11 @@ species so only organisms you have references for reach `samples.tsv`. It reads
 `TRANSCRIPTOMIC` or `GENOMIC` (falling back to all RNA-Seq rows, with a
 warning, if none pass), derives the `Genus_species` key from `Organism`,
 deduplicates by accession, validates it against `^[SED]RR\d+$`, and writes
-three columns: `SRR`, `SPECIES`, `LAYOUT`.
+`SRR`, `SPECIES`, `LAYOUT` followed by the sample metadata a design formula
+needs: `TISSUE`, `PLATFORM`, `INSTRUMENT`, `BIOPROJECT`, `DEV_STAGE`, `SEX`,
+`TREATMENT`. Each one takes the first informative value among the RunTable
+fields submitters use for it (`tissue`, `tissue_type`, `Organism_part`, …);
+empty cells and INSDC placeholders such as `missing` become `NA`.
 
 Worth reviewing before a full run. To produce it on its own:
 
@@ -276,7 +280,7 @@ results/
 │   ├── gene_expression_matrix.tsv    # inner join of every genes.results
 │   ├── STAR_mapping_QC_matrix.tsv    # Log.final.out metrics × samples
 │   └── BBDUK_preprocessing_QC_matrix.tsv
-├── samples.tsv                       # SRR, SPECIES, LAYOUT
+├── samples.tsv                       # SRR, SPECIES, LAYOUT + sample metadata
 └── pipeline_sample_summary.tsv       # per-sample status tracker
 
 logs/            <SRR>.log plus one log per tool and per attempt
@@ -374,7 +378,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 101 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 110 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -389,7 +393,7 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 101 passed, 0 failed.
+# Results: 110 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout

@@ -11,6 +11,24 @@ from typing import Optional
 
 ACCESSION_RE = re.compile(r"^[SED]RR\d+$")
 
+# Sample-sheet columns written after LAYOUT, each mapped to the RunTable fields
+# it may come from; the first informative one wins. Submitters spread the same
+# attribute over differently named BioSample fields.
+METADATA = {
+    "TISSUE":     ("tissue", "tissue_type", "Organism_part"),
+    "PLATFORM":   ("Platform",),
+    "INSTRUMENT": ("Instrument",),
+    "BIOPROJECT": ("BioProject",),
+    "DEV_STAGE":  ("dev_stage", "Developmental_Stage", "Development_stage", "lifestage"),
+    "SEX":        ("sex", "gender"),
+    "TREATMENT":  ("treatment", "Diet"),
+}
+
+# INSDC null placeholders. Kept out of the sample sheet so a design formula
+# never sees "missing" as a factor level.
+_NULLS = {"", "missing", "not applicable", "not collected", "not provided",
+          "not determined", "unknown", "na", "n/a"}
+
 
 def _load(path: Path) -> list[dict]:
     if path.suffix.lower() in {".xlsx", ".xls"}:
@@ -40,6 +58,17 @@ def _get(row: dict, *keys: str) -> str:
         if v is not None and str(v).strip():
             return str(v).strip()
     return ""
+
+
+def _meta(row: dict, keys: tuple) -> str:
+    """First non-placeholder value among `keys`, or NA. Never empty: bash reads
+    samples.tsv with IFS=tab, which collapses consecutive tabs. Inner whitespace
+    is collapsed so free text cannot carry a tab or newline into the TSV."""
+    for k in keys:
+        v = _get(row, k)
+        if v.lower() not in _NULLS:
+            return " ".join(v.split())
+    return "NA"
 
 
 def _derive_key(organism: str) -> Optional[str]:
@@ -161,14 +190,15 @@ def main() -> None:
             except ValueError:
                 pass
 
-        clean.append({"SRR": srr, "SPECIES": r["_sp"], "LAYOUT": layout})
+        clean.append({"SRR": srr, "SPECIES": r["_sp"], "LAYOUT": layout,
+                      **{col: _meta(r, keys) for col, keys in METADATA.items()}})
 
     if not clean:
         sys.exit("[ABORT] No valid RNA-Seq samples found.")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=["SRR", "SPECIES", "LAYOUT"],
+        w = csv.DictWriter(fh, fieldnames=["SRR", "SPECIES", "LAYOUT", *METADATA],
                            delimiter="\t", lineterminator="\n")
         w.writeheader()
         w.writerows(clean)
@@ -177,6 +207,7 @@ def main() -> None:
     by_species = Counter(r["SPECIES"] for r in clean)
     print(f"[DONE] {len(clean)} samples written to: {args.output}")
     print(f"       Layout  : {dict(by_layout)}")
+    print(f"       Tissue  : {dict(Counter(r['TISSUE'] for r in clean))}")
     for sp, n in sorted(by_species.items()):
         print(f"       {sp}: {n}")
 
