@@ -20,6 +20,9 @@ METADATA = {
     "TREATMENT": ("treatment", "Diet"),
 }
 
+# STAR/RSEM as configured here take short base-space reads only.
+UNSUPPORTED_PLATFORMS = {"PACBIO_SMRT", "OXFORD_NANOPORE", "LS454", "ABI_SOLID"}
+
 # INSDC placeholders, written as NA so they never become a factor level.
 _NULLS = {
     "",
@@ -197,9 +200,20 @@ def main() -> None:
                 f"0 samples retained. Pass --allow-genomic-source to also accept GENOMIC."
             )
 
+    supported = [
+        r
+        for r in sourced
+        if _get(r, "Platform", "platform").upper() not in UNSUPPORTED_PLATFORMS
+    ]
+    if len(supported) < len(sourced):
+        print(
+            f"[WARN] {len(sourced) - len(supported)} runs from long-read or colorspace "
+            f"platforms excluded ({', '.join(sorted(UNSUPPORTED_PLATFORMS))})."
+        )
+
     expected_len = args.star_overhang + 1 if args.star_overhang is not None else None
     seen, clean = set(), []
-    for r in sourced:
+    for r in supported:
         sp = _species(
             _get(r, "Organism", "organism", "scientific_name"), allowed, args.fallback
         )

@@ -204,7 +204,8 @@ species so only organisms you have references for reach `samples.tsv`. It reads
 `.csv` or `.xlsx`, keeps `RNA-Seq` records whose `LibrarySource` is
 `TRANSCRIPTOMIC` or `GENOMIC` (falling back to all RNA-Seq rows, with a
 warning, if none pass), derives the `Genus_species` key from `Organism`,
-deduplicates by accession, validates it against `^[SED]RR\d+$`, and writes
+drops runs from long-read or colorspace platforms (PacBio, Nanopore, 454,
+SOLiD), deduplicates by accession, validates it against `^[SED]RR\d+$`, and writes
 `SRR`, `SPECIES`, `LAYOUT` followed by the sample metadata a design formula
 needs: `TISSUE`, `PLATFORM`, `INSTRUMENT`, `BIOPROJECT`, `DEV_STAGE`, `SEX`,
 `TREATMENT`. Each one takes the first informative value among the RunTable
@@ -384,7 +385,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 118 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 120 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -399,7 +400,7 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 118 passed, 0 failed.
+# Results: 120 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout

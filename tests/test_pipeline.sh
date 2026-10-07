@@ -315,6 +315,19 @@ SRR910003,WGS,GENOMIC,PAIRED,Helicoverpa armigera
 CSV
 python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
     --input "${tmpd}/runs.csv" --output "${tmpd}/runs.tsv" --runs srr910002 >/dev/null 2>&1 || true
+cat > "${tmpd}/platforms.csv" <<'CSV'
+Run,Assay Type,LibrarySource,LibraryLayout,Organism,Platform
+SRR920001,RNA-Seq,TRANSCRIPTOMIC,PAIRED,Helicoverpa armigera,ILLUMINA
+SRR920002,RNA-Seq,TRANSCRIPTOMIC,SINGLE,Helicoverpa armigera,OXFORD_NANOPORE
+SRR920003,RNA-Seq,TRANSCRIPTOMIC,SINGLE,Helicoverpa armigera,ABI_SOLID
+CSV
+python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/platforms.csv" --output "${tmpd}/platforms.tsv" >/dev/null 2>&1 || true
+assert_eq "parse_runtable: long-read and colorspace platforms are excluded" \
+    "$(awk -F'\t' 'NR>1{print $1}' "${tmpd}/platforms.tsv" 2>/dev/null)" "SRR920001"
+assert_fails "parse_runtable: --runs aborts on a run from an excluded platform" \
+    python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/platforms.csv" --output "${tmpd}/platforms2.tsv" --runs SRR920002
 assert_eq "parse_runtable: --runs keeps only the named accession" \
     "$(awk -F'\t' 'NR>1{print $1"/"$3}' "${tmpd}/runs.tsv" 2>/dev/null)" "SRR910002/SINGLE"
 assert_fails "parse_runtable: --runs aborts on an accession filtered out" \
