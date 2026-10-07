@@ -46,6 +46,14 @@ require_file() {
     die "Required file missing: ${path}"
 }
 
+# True only when every path given exists.
+_files_present() {
+    local path
+    for path in "$@"; do
+        [[ -f "$path" ]] || return 1
+    done
+}
+
 require_dir() {
     local path="$1" hint="${2:-}"
     [[ -d "$path" ]] && return 0

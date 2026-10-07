@@ -25,14 +25,6 @@ _build_bbduk_args() {
     return 0
 }
 
-# True only when every path given exists.
-_files_present() {
-    local path
-    for path in "$@"; do
-        [[ -f "$path" ]] || return 1
-    done
-}
-
 step_bbduk() {
     local srr="$1" layout="$2"
 

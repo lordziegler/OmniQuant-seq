@@ -99,13 +99,13 @@ process_sample() {
     fi
 
     if [[ "$CLEAN_RAW_FASTQ_AFTER_RSEM" == true ]]; then
-        cleanup_raw_fastq "$srr" "${RAW_1:-}" "${RAW_2:-}" "${RAW_SE:-}"
+        cleanup_files "$srr" "Raw FASTQ" "${RAW_1:-}" "${RAW_2:-}" "${RAW_SE:-}"
     fi
 
     if [[ "$layout" == "PAIRED" ]]; then
         step_fastqc "$srr" "CLEAN" "$CLEAN_1" "$CLEAN_2"
         step_multiqc_sample "$srr" "PAIRED"
-        cleanup_raw_fastq "$srr" "$SINGLETONS"
+        cleanup_files "$srr" "BBDuk singletons" "$SINGLETONS"
     else
         step_fastqc "$srr" "CLEAN" "$CLEAN_SE"
         step_multiqc_sample "$srr" "SINGLE"
@@ -119,11 +119,10 @@ process_sample() {
         rsem_status="FAILED"; _record_sample_failure "$srr" "$species" "$layout" rsem; return 0
     fi
 
-    cleanup_star_tmp "$srr"
-    cleanup_rsem_tmp "$srr"
+    cleanup_tmp "$srr"
     cleanup_rsem_bam "$srr" "$species_out"
     if [[ "$CLEAN_FASTQ_AFTER_RSEM" == true ]]; then
-        cleanup_clean_fastq "$srr" "${CLEAN_1:-}" "${CLEAN_2:-}" "${CLEAN_SE:-}"
+        cleanup_files "$srr" "Clean FASTQ" "${CLEAN_1:-}" "${CLEAN_2:-}" "${CLEAN_SE:-}"
     fi
 
     tracker_update "$srr" "$species" "$layout" \

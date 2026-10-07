@@ -23,9 +23,7 @@ step_multiqc_sample() {
         zips=( "fastqc_out/${srr}_clean_fastqc.zip" )
     fi
 
-    local missing=false z
-    for z in "${zips[@]}"; do [[ ! -f "$z" ]] && missing=true; done
-    if [[ "$missing" == true ]]; then
+    if ! _files_present "${zips[@]}"; then
         log_step "$srr" "MULTIQC" "Clean FastQC zips missing — skipping."
         return 0
     fi

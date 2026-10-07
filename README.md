@@ -261,11 +261,9 @@ Intermediates are deleted as soon as the next step confirms its output:
 | `lib/cleanup.sh` | Deletes | Freed per sample |
 |:--|:--|:--|
 | `cleanup_sra` | `.sra` archive + prefetch directory | 1–5 GB |
-| `cleanup_raw_fastq` | Uncompressed raw FASTQ | 2–10 GB |
-| `cleanup_clean_fastq` | Trimmed `.fastq.gz` | 1–4 GB |
-| `cleanup_star_tmp` | STAR temporary directory | 2–8 GB |
+| `cleanup_files` | Uncompressed raw FASTQ, then trimmed `.fastq.gz` | 2–10 GB, 1–4 GB |
+| `cleanup_tmp` | STAR and RSEM temporary directories | 2–8 GB + variable |
 | `cleanup_rsem_bam` | `.transcript.bam` | 10–60 GB |
-| `cleanup_rsem_tmp` | RSEM temporary directory | variable |
 
 Set `CLEAN_SRA_AFTER_FASTQ`, `CLEAN_RAW_FASTQ_AFTER_RSEM` or
 `CLEAN_FASTQ_AFTER_RSEM` to `false` to keep them; `--example` does this for all
@@ -386,7 +384,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 114 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 118 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -401,7 +399,7 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 114 passed, 0 failed.
+# Results: 118 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout

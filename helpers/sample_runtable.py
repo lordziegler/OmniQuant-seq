@@ -12,10 +12,9 @@ import math
 import random
 from pathlib import Path
 
-from parse_runtable import _get, _load
+from parse_runtable import RUN_KEYS, _get, _load
 
 Z95 = 1.96
-RUN_KEYS = ("Run", "Run Accession", "RunAccession", "Accession")
 
 
 def cochran(population: int, margin: float = 0.05, p: float = 0.5) -> int:

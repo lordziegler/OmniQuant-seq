@@ -23,14 +23,13 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
 
     sample_data: dict = {}
     gene_ann:    dict = {}
-    gene_sets:   list = []
 
+    needed = {*_BASE, "TPM", "FPKM"}
     for f in files:
         sample = f.stem.replace(".genes", "")
         rows: dict = {}
         with f.open(newline="") as fh:
             reader = csv.DictReader(fh, delimiter="\t")
-            needed = set(_BASE + ["TPM", "FPKM"])
             if needed - set(reader.fieldnames or []):
                 print(f"[WARN] Skipping {f} — missing columns.")
                 continue
@@ -40,13 +39,12 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
                 rows[g] = (row["TPM"], row["FPKM"])
         if rows:
             sample_data[sample] = rows
-            gene_sets.append(set(rows))
 
     if not sample_data:
         print("[WARN] No valid samples.")
         return
 
-    common  = sorted(set.intersection(*gene_sets))
+    common  = sorted(set.intersection(*map(set, sample_data.values())))
     samples = sorted(sample_data)
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -126,7 +124,7 @@ def bbduk_qc(log_dir: Path, output: Path) -> None:
               "Result_reads", "Result_reads_percent", "Result_bases", "Result_bases_percent"]
     rows = []
     for f in files:
-        d = {k: "NA" for k in fields}
+        d = dict.fromkeys(fields, "NA")
         d["Sample"] = f.name.replace("_bbduk.log", "")
         for line in f.read_text(errors="ignore").splitlines():
             m = _BBDUK_RE.search(line)

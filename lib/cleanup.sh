@@ -10,23 +10,17 @@ cleanup_sra() {
     disk_usage "post-sra-cleanup [${srr}]"
 }
 
-cleanup_raw_fastq() {
-    local srr="$1"; shift
+# Remove the given files and log what they were: cleanup_files SRR LABEL FILE...
+cleanup_files() {
+    local srr="$1" label="$2"; shift 2
     rm -f "$@"
-    log_step "$srr" "CLEANUP" "Raw FASTQ removed."
+    log_step "$srr" "CLEANUP" "${label} removed."
 }
 
-cleanup_clean_fastq() {
-    local srr="$1"; shift
-    rm -f "$@"
-    log_step "$srr" "CLEANUP" "Clean FASTQ removed."
-}
-
-cleanup_star_tmp() {
+# STAR and RSEM scratch directories of one sample.
+cleanup_tmp() {
     local srr="$1"
-    rm -rf "${TMP_DIR}/${srr}_star"
-    log_step "$srr" "CLEANUP" "STAR temp dir removed."
-    disk_usage "post-star-cleanup [${srr}]"
+    rm -rf "${TMP_DIR}/${srr}_star" "${TMP_DIR}/${srr}_rsem_tmp"
 }
 
 cleanup_rsem_bam() {
@@ -38,14 +32,8 @@ cleanup_rsem_bam() {
     disk_usage "post-bam-cleanup [${srr}]"
 }
 
-cleanup_rsem_tmp() {
-    local srr="$1"
-    rm -rf "${TMP_DIR}/${srr}_rsem_tmp"
-}
-
 cleanup_on_error() {
     local srr="$1"; shift
-    rm -f "$@"
-    rm -rf "${TMP_DIR}/${srr}_rsem_tmp" "${TMP_DIR}/${srr}_star"
-    log_step "$srr" "CLEANUP" "Partial files removed after failure."
+    cleanup_tmp "$srr"
+    cleanup_files "$srr" "Partial files" "$@"
 }

@@ -79,15 +79,12 @@ _infer_strandedness() {
     [[ -f "$gene_counts" ]] || return 0
     cp "$gene_counts" "${LOG_DIR}/${srr}_STAR_ReadsPerGene.out.tab"
 
-    local fwd rev
-    read -r fwd rev < <(awk 'NR>4 {f+=$3; r+=$4} END {print f+0, r+0}' "$gene_counts")
-    (( fwd + rev == 0 )) && return 0
-
-    STRAND_RATIO=$(awk -v f="$fwd" -v r="$rev" 'BEGIN{printf "%.3f", f/(f+r)}')
-    FORWARD_PROB=$(awk -v r="$STRAND_RATIO" 'BEGIN{
-        if (r > 0.8)      print 1;
-        else if (r < 0.2) print 0;
-        else              print 0.5;
-    }')
+    # Columns 3/4 after the 4 summary rows are forward/reverse counts.
+    read -r STRAND_RATIO FORWARD_PROB < <(awk 'NR>4 {f+=$3; r+=$4} END {
+        if (f + r == 0) { print "NA", 0.5; exit }
+        s = sprintf("%.3f", f / (f + r)); x = s + 0
+        print s, (x > 0.8 ? 1 : (x < 0.2 ? 0 : 0.5))
+    }' "$gene_counts")
+    [[ "$STRAND_RATIO" == NA ]] && return 0
     log_step "$srr" "STAR" "Strand ratio fwd/(fwd+rev)=${STRAND_RATIO} -> RSEM --forward-prob ${FORWARD_PROB}"
 }

@@ -15,6 +15,7 @@ PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_CFG="${PIPELINE_DIR}/config/pipeline.sh"
 SPECIES_CFG="${PIPELINE_DIR}/config/species.sh"
 
+# shellcheck source=config/pipeline.sh
 source "$PIPELINE_CFG"
 source "${PIPELINE_DIR}/lib/utils.sh"
 source "${PIPELINE_DIR}/lib/prompt.sh"
@@ -23,86 +24,11 @@ source "${PIPELINE_DIR}/lib/species_config.sh"
 source "${PIPELINE_DIR}/steps/build_references.sh"
 
 # =============================================================================
-# Compute resources → config/pipeline.sh
+# config/pipeline.sh knobs
 # =============================================================================
-configure_resources() {
-    local max_cpus avail_ram_gb avail_disk_gb
-    local new_t_dl new_t_fqc new_t_trim new_t_star new_mem new_t_rsem \
-          new_sra_size new_disk_warn
-    max_cpus=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 64)
-    avail_ram_gb=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}' \
-                  || sysctl -n hw.memsize 2>/dev/null | awk '{printf "%d", $1/1073741824}' \
-                  || echo 64)
-    avail_disk_gb=$(df -BG . 2>/dev/null | awk 'NR==2{ gsub("G","",$4); print $4 }' || echo 999)
-
-    echo ""
-    echo "========================================================"
-    echo " Compute resources"
-    echo " Detected CPUs  : ${max_cpus}"
-    echo " Available RAM  : ${avail_ram_gb} GB"
-    echo " Available disk : ${avail_disk_gb} GB"
-    echo " Press Enter to keep the current value."
-    echo "========================================================"
-
-    echo ""; echo " Download / fasterq-dump"
-    prompt_int new_t_dl   "Threads (THREADS_DOWNLOAD)" "$THREADS_DOWNLOAD" 1 "$max_cpus"
-
-    echo ""; echo " FastQC"
-    prompt_int new_t_fqc  "Threads (THREADS_FASTQC)"   "$THREADS_FASTQC"   1 "$max_cpus"
-
-    echo ""; echo " BBDuk trimming"
-    prompt_int new_t_trim "Threads (THREADS_TRIM)"     "$THREADS_TRIM"     1 "$max_cpus"
-
-    echo ""; echo " STAR alignment"
-    prompt_int new_t_star "Threads (THREADS_STAR)"     "$THREADS_STAR"     1 "$max_cpus"
-    prompt_int new_mem    "RAM limit GB (MAX_MEMORY_GB — index build, --limitGenomeGenerateRAM)" \
-                          "$MAX_MEMORY_GB" 1 "$avail_ram_gb"
-
-    echo ""; echo " RSEM quantification"
-    prompt_int new_t_rsem "Threads (THREADS_RSEM)"     "$THREADS_RSEM"     1 "$max_cpus"
-
-    echo ""; echo " Storage"
-    prompt_storage new_sra_size  "Max SRA prefetch size (MAX_SRA_SIZE)" "$MAX_SRA_SIZE"
-    prompt_int     new_disk_warn "Disk warning threshold GB (DISK_WARN_GB)" "$DISK_WARN_GB" 1 9999
-
-    echo ""
-    echo "========================================================"
-    echo " Summary — compute resources:"
-    printf "  THREADS_DOWNLOAD : %s\n"    "$new_t_dl"
-    printf "  THREADS_FASTQC   : %s\n"    "$new_t_fqc"
-    printf "  THREADS_TRIM     : %s\n"    "$new_t_trim"
-    printf "  THREADS_STAR     : %s\n"    "$new_t_star"
-    printf "  MAX_MEMORY_GB    : %s GB\n" "$new_mem"
-    printf "  THREADS_RSEM     : %s\n"    "$new_t_rsem"
-    printf "  MAX_SRA_SIZE     : %s\n"    "$new_sra_size"
-    printf "  DISK_WARN_GB     : %s GB\n" "$new_disk_warn"
-    echo "========================================================"
-
-    if ! confirm "Write these values to config/pipeline.sh?"; then
-        echo " Skipped — config/pipeline.sh unchanged."
-        return 0
-    fi
-
-    sed -i \
-        -e "s|^THREADS_DOWNLOAD=.*|THREADS_DOWNLOAD=${new_t_dl}|" \
-        -e "s|^THREADS_FASTQC=.*|THREADS_FASTQC=${new_t_fqc}|" \
-        -e "s|^THREADS_TRIM=.*|THREADS_TRIM=${new_t_trim}|" \
-        -e "s|^THREADS_STAR=.*|THREADS_STAR=${new_t_star}|" \
-        -e "s|^MAX_MEMORY_GB=.*|MAX_MEMORY_GB=${new_mem}|" \
-        -e "s|^THREADS_RSEM=.*|THREADS_RSEM=${new_t_rsem}|" \
-        -e "s|^MAX_SRA_SIZE=.*|MAX_SRA_SIZE=\"${new_sra_size}\"|" \
-        -e "s|^DISK_WARN_GB=.*|DISK_WARN_GB=${new_disk_warn}|" \
-        "$PIPELINE_CFG"
-    echo " config/pipeline.sh updated."
-}
-
-# =============================================================================
-# Analysis parameters → config/pipeline.sh
-# =============================================================================
-# The knobs configure_resources does not own. One row per variable:
-#   name|kind|constraint|prompt
-# kind is int (constraint is "min max"), choice (constraint lists the accepted
-# values) or path. Adding a knob here is the whole change; the loop below
+# One row per variable: name|kind|constraint|prompt. kind is int (constraint
+# is "min max"), choice (constraint lists the accepted values), storage or
+# path. Adding a knob to a table is the whole change; _configure_params
 # prompts, validates and writes it.
 _ANALYSIS_PARAMS=(
     "TEST_MODE|choice|true false|Limit runs to TEST_READS reads (TEST_MODE)"
@@ -118,7 +44,10 @@ _ANALYSIS_PARAMS=(
     "BBDUK_REF|path||Adapter FASTA, none to skip clipping (BBDUK_REF)"
 )
 
-configure_analysis() {
+# Prompt for every table row given, summarise, and write the answers to
+# config/pipeline.sh once confirmed: _configure_params TITLE ROW...
+_configure_params() {
+    local title="$1"; shift
     # Not named `value`: the prompt_* helpers use that name for their own
     # local, and printf -v would then write to theirs instead of ours.
     local entry name kind constraint text current new_value quoted
@@ -126,20 +55,21 @@ configure_analysis() {
 
     echo ""
     echo "========================================================"
-    echo " Analysis parameters"
+    echo " ${title}"
     echo " Press Enter to keep the current value."
     echo "========================================================"
     echo ""
 
-    for entry in "${_ANALYSIS_PARAMS[@]}"; do
+    for entry in "$@"; do
         IFS='|' read -r name kind constraint text <<< "$entry"
         current="${!name}"
+        # shellcheck disable=SC2086  # constraint is a deliberate word list
         case "$kind" in
-            # shellcheck disable=SC2086  # constraint is a deliberate word list
-            int)    prompt_int    new_value "$text" "$current" $constraint ;;
-            choice) prompt_choice new_value "$text" "$current" $constraint ;;
-            path)   prompt_path   new_value "$text" "$current" ;;
-            *)      die "Unknown parameter kind '${kind}' for ${name}." ;;
+            int)     prompt_int     new_value "$text" "$current" $constraint ;;
+            choice)  prompt_choice  new_value "$text" "$current" $constraint ;;
+            storage) prompt_storage new_value "$text" "$current" ;;
+            path)    prompt_path    new_value "$text" "$current" ;;
+            *)       die "Unknown parameter kind '${kind}' for ${name}." ;;
         esac
 
         # Only ints are written bare; everything else may be empty or a word.
@@ -151,7 +81,7 @@ configure_analysis() {
 
     echo ""
     echo "========================================================"
-    echo " Summary — analysis parameters:"
+    echo " Summary — ${title,,}:"
     printf '%s\n' "${summary[@]}"
     echo "========================================================"
 
@@ -162,6 +92,31 @@ configure_analysis() {
 
     sed -i "${sed_args[@]}" "$PIPELINE_CFG"
     echo " config/pipeline.sh updated."
+}
+
+configure_resources() {
+    local cpus ram disk
+    cpus=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 64)
+    ram=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}' \
+          || sysctl -n hw.memsize 2>/dev/null | awk '{printf "%d", $1/1073741824}' \
+          || echo 64)
+    disk=$(df -BG . 2>/dev/null | awk 'NR==2{ gsub("G","",$4); print $4 }' || echo 999)
+
+    echo ""
+    echo " Detected: ${cpus} CPUs, ${ram} GB RAM, ${disk} GB free disk."
+    _configure_params "Compute resources" \
+        "THREADS_DOWNLOAD|int|1 ${cpus}|fasterq-dump threads (THREADS_DOWNLOAD)" \
+        "THREADS_FASTQC|int|1 ${cpus}|FastQC threads (THREADS_FASTQC)" \
+        "THREADS_TRIM|int|1 ${cpus}|BBDuk threads (THREADS_TRIM)" \
+        "THREADS_STAR|int|1 ${cpus}|STAR threads (THREADS_STAR)" \
+        "MAX_MEMORY_GB|int|1 ${ram}|RAM limit GB for the STAR index build (MAX_MEMORY_GB)" \
+        "THREADS_RSEM|int|1 ${cpus}|RSEM threads (THREADS_RSEM)" \
+        "MAX_SRA_SIZE|storage||Max SRA prefetch size (MAX_SRA_SIZE)" \
+        "DISK_WARN_GB|int|1 9999|Disk warning threshold GB (DISK_WARN_GB)"
+}
+
+configure_analysis() {
+    _configure_params "Analysis parameters" "${_ANALYSIS_PARAMS[@]}"
 }
 
 # =============================================================================
@@ -266,9 +221,9 @@ configure_species() {
         read_species_indices to_toggle "$toggle_input"
         for idx in "${to_toggle[@]}"; do
             if [[ "${SP_ACTIVE[$idx]}" == "true" ]]; then
-                SP_ACTIVE[$idx]="false"; echo "  → ${SP_KEYS[$idx]} set to OFF"
+                SP_ACTIVE[idx]="false"; echo "  → ${SP_KEYS[$idx]} set to OFF"
             else
-                SP_ACTIVE[$idx]="true";  echo "  → ${SP_KEYS[$idx]} set to ON"
+                SP_ACTIVE[idx]="true";  echo "  → ${SP_KEYS[$idx]} set to ON"
             fi
         done
     fi

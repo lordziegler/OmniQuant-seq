@@ -73,7 +73,7 @@ species_config_upsert() {
     local idx; idx="$(species_config_index "$key")"
 
     if (( idx >= 0 )); then
-        SP_FNA[$idx]="$fna"; SP_GTF[$idx]="$gtf"; SP_ACTIVE[$idx]="$active"
+        SP_FNA[idx]="$fna"; SP_GTF[idx]="$gtf"; SP_ACTIVE[idx]="$active"
         SPECIES_CONFIG_LAST_ACTION="updated"
     else
         SP_KEYS+=( "$key" ); SP_FNA+=( "$fna" )

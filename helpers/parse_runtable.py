@@ -7,7 +7,6 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Optional
 
 ACCESSION_RE = re.compile(r"^[SED]RR\d+$")
 RUN_KEYS = ("Run", "Run Accession", "RunAccession", "Accession")
@@ -72,7 +71,7 @@ def _meta(row: dict, keys: tuple) -> str:
     return "NA"
 
 
-def _derive_key(organism: str) -> Optional[str]:
+def _derive_key(organism: str) -> str | None:
     """Turn a scientific name into a Genus_species key, matching the naming
     convention used by SPECIES_CONFIG in config/species.sh. Works for any taxon:
     'Helicoverpa armigera' -> 'Helicoverpa_armigera'."""
@@ -84,17 +83,13 @@ def _derive_key(organism: str) -> Optional[str]:
     return None
 
 
-def _species(organism: str, allowed: Optional[set], fallback: Optional[str]) -> Optional[str]:
+def _species(organism: str, allowed: set | None, fallback: str | None) -> str | None:
     """Resolve a RunTable row to a species key. The key is derived from the
     Organism field (no hardcoded species list); `fallback` is used when the
     field is empty or unresolvable. When `allowed` is given, only keys in that
     set are kept, so a run processes only the species you have references for."""
     key = _derive_key(organism) or fallback
-    if key is None:
-        return None
-    if allowed and key not in allowed:
-        return None
-    return key
+    return key if key and (not allowed or key in allowed) else None
 
 
 def _layout(raw: str) -> str:
@@ -154,29 +149,22 @@ def main() -> None:
     print(f"[INFO] After RNA-Seq filter: {len(rnaseq)}")
 
     allowed_sources = {"TRANSCRIPTOMIC"} | ({"GENOMIC"} if args.allow_genomic_source else set())
-    has_source = [r for r in rnaseq
-                  if _get(r, "LibrarySource", "Library Source", "library_source")]
-    if not has_source:
+    sources = [_get(r, "LibrarySource", "Library Source", "library_source") for r in rnaseq]
+    if not any(sources):
         print("[WARN] LibrarySource field not found or empty — using all RNA-Seq rows.")
         sourced = rnaseq
     else:
-        sourced = [r for r in has_source
-                   if _get(r, "LibrarySource", "Library Source", "library_source") in allowed_sources]
+        sourced = [r for r, s in zip(rnaseq, sources) if s in allowed_sources]
         if not sourced:
             print(f"[WARN] No records matched LibrarySource {sorted(allowed_sources)} — "
                   f"0 samples retained. Pass --allow-genomic-source to also accept GENOMIC.")
 
-    mapped = []
+    expected_len = args.star_overhang + 1 if args.star_overhang is not None else None
+    seen, clean = set(), []
     for r in sourced:
         sp = _species(_get(r, "Organism", "organism", "scientific_name"), allowed, args.fallback)
-        if sp:
-            mapped.append({**r, "_sp": sp})
-
-    seen:  set   = set()
-    clean: list  = []
-    for r in mapped:
         srr = _get(r, *RUN_KEYS).replace("\r", "")
-        if not ACCESSION_RE.match(srr) or srr in seen:
+        if not sp or not ACCESSION_RE.match(srr) or srr in seen:
             continue
         seen.add(srr)
         layout = _layout(_get(r, "LibraryLayout", "Library Layout", "library_layout"))
@@ -189,19 +177,17 @@ def main() -> None:
                       f"--assume-layout PAIRED|SINGLE to include it.")
                 continue
 
-        if args.star_overhang is not None:
-            avg_len_raw = _get(r, "AvgSpotLen", "avg_spot_len")
-            expected = args.star_overhang + 1
+        if expected_len:
             try:
-                avg_len = float(avg_len_raw)
-                if avg_len and not (0.5 * expected <= avg_len <= 2 * expected):
-                    print(f"[WARN] {srr}: AvgSpotLen={avg_len:.0f} nt is far from "
-                          f"STAR_OVERHANG+1={expected} nt — the shared per-species index "
-                          f"may be poorly matched for this run's read length.")
+                avg_len = float(_get(r, "AvgSpotLen", "avg_spot_len"))
             except ValueError:
-                pass
+                avg_len = 0
+            if avg_len and not (0.5 * expected_len <= avg_len <= 2 * expected_len):
+                print(f"[WARN] {srr}: AvgSpotLen={avg_len:.0f} nt is far from "
+                      f"STAR_OVERHANG+1={expected_len} nt — the shared per-species index "
+                      f"may be poorly matched for this run's read length.")
 
-        clean.append({"SRR": srr, "SPECIES": r["_sp"], "LAYOUT": layout,
+        clean.append({"SRR": srr, "SPECIES": sp, "LAYOUT": layout,
                       **{col: _meta(r, keys) for col, keys in METADATA.items()}})
 
     # A requested accession that silently drops out would leave the user
@@ -220,12 +206,10 @@ def main() -> None:
         w.writeheader()
         w.writerows(clean)
 
-    by_layout  = Counter(r["LAYOUT"]  for r in clean)
-    by_species = Counter(r["SPECIES"] for r in clean)
     print(f"[DONE] {len(clean)} samples written to: {args.output}")
-    print(f"       Layout  : {dict(by_layout)}")
+    print(f"       Layout  : {dict(Counter(r['LAYOUT'] for r in clean))}")
     print(f"       Tissue  : {dict(Counter(r['TISSUE'] for r in clean))}")
-    for sp, n in sorted(by_species.items()):
+    for sp, n in sorted(Counter(r["SPECIES"] for r in clean).items()):
         print(f"       {sp}: {n}")
 
 

@@ -728,6 +728,23 @@ loop_layout="$(
 assert_eq "run_sample_loop: metadata columns do not leak into layout" "$loop_layout" "layout:PAIRED"
 rm -rf "$tmpd"
 
+# --- Strandedness ------------------------------------------------------------
+# A ratio of exactly 0.8 is not stranded enough for --forward-prob 1; 0.9 is.
+source "${PIPELINE_DIR}/steps/align.sh"
+tmpd="$(mktemp -d)"
+LOG_DIR="$tmpd"
+strand_case() {
+    printf 'N_a\t0\t0\t0\nN_b\t0\t0\t0\nN_c\t0\t0\t0\nN_d\t0\t0\t0\ng\t100\t%s\t%s\n' "$1" "$2" \
+        > "${tmpd}/rpg.tab"
+    _infer_strandedness S "${tmpd}/rpg.tab" >/dev/null
+    echo "${STRAND_RATIO}/${FORWARD_PROB}"
+}
+assert_eq "_infer_strandedness: 0.9 is forward-stranded"  "$(strand_case 90 10)" "0.900/1"
+assert_eq "_infer_strandedness: 0.8 stays unstranded"     "$(strand_case 80 20)" "0.800/0.5"
+assert_eq "_infer_strandedness: 0.1 is reverse-stranded"  "$(strand_case 10 90)" "0.100/0"
+assert_eq "_infer_strandedness: no counts leaves defaults" "$(strand_case 0 0)"  "NA/0.5"
+rm -rf "$tmpd"
+
 # --- BBDuk trimming ----------------------------------------------------------
 source "${PIPELINE_DIR}/steps/trim.sh"
 
