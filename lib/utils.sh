@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
-# Shared utilities sourced by every pipeline module.
-# Nothing here is organism-specific.
 
 CONDA_ENV_NAME="omniquant-seq"
 
-# --- Messaging ---------------------------------------------------------------
-
-# Print an abort message on stderr and stop the script.
 die() {
     echo "[ABORT] $*" >&2
     exit 1
 }
 
-# Per-sample log line, echoed and appended to ${LOG_DIR}/<sample>.log.
 log_step() {
     local srr="$1" tag="$2" msg="$3"
     local ts line
@@ -22,8 +16,6 @@ log_step() {
     mkdir -p "$LOG_DIR"
     echo "$line" >> "${LOG_DIR}/${srr}.log"
 }
-
-# --- Environment checks ------------------------------------------------------
 
 check_tools() {
     local tool missing=0
@@ -46,7 +38,6 @@ require_file() {
     die "Required file missing: ${path}"
 }
 
-# True only when every path given exists.
 _files_present() {
     local path
     for path in "$@"; do
@@ -61,8 +52,6 @@ require_dir() {
     die "Required directory missing: ${path}"
 }
 
-# --- Disk --------------------------------------------------------------------
-
 disk_usage() {
     local label="$1"
     local used avail
@@ -74,10 +63,7 @@ disk_usage() {
     fi
 }
 
-# --- Downloads ---------------------------------------------------------------
-
-# Fetch a URL to $dest via a .part file, so an interrupted transfer is never
-# mistaken for a complete one on the next run.
+# Via a .part file, so an interrupted transfer never passes for a complete one.
 download_file() {
     local url="$1" dest="$2"
     local part="${dest}.part"
@@ -85,7 +71,6 @@ download_file() {
     mkdir -p "$(dirname "$dest")"
     rm -f "$part"
 
-    # Progress meters are noise in a log file; keep them only on a terminal.
     local quiet=()
     [[ -t 2 ]] || quiet=( --silent --show-error )
 
@@ -106,11 +91,8 @@ download_file() {
     mv "$part" "$dest"
 }
 
-# Best-effort integrity check against NCBI's md5checksums.txt, published in
-# the same FTP directory as the reference file. Sources that do not publish
-# one (a non-NCBI URL) are not blocked — gzip -t below still catches
-# truncation; this only adds protection against a truncated-but-valid-gzip or
-# silently wrong file (M9).
+# Best-effort: a source without md5checksums.txt only warns; gzip -t still
+# catches truncation.
 _verify_md5() {
     local src="$1" url="$2"
     local base="${url%/*}" fname="${url##*/}"
@@ -138,11 +120,8 @@ _verify_md5() {
     echo "[OK] Checksum verified: ${fname}"
 }
 
-# Produce the decompressed $dest from, in order of preference:
-#   1. $dest itself, if it already exists (idempotent re-runs);
-#   2. $local_gz, a gzip file already on disk — never deleted, it may be an
-#      input the user supplied;
-#   3. $url, downloaded next to $dest and removed once decompressed.
+# Source order: existing $dest, then $local_gz (the user's, never deleted),
+# then $url.
 fetch_and_decompress() {
     local dest="$1" local_gz="${2:-}" url="${3:-}"
 
@@ -163,15 +142,12 @@ fetch_and_decompress() {
         fi
     fi
 
-    # Checksum verification only applies to files this run downloaded — a
-    # user-supplied local_gz is trusted as-is, and requiring internet access
-    # to use one would break offline/manual-reference usage.
+    # Only downloads are checked, so a user-supplied archive works offline.
     if [[ "$downloaded" == true && -n "$url" ]]; then
         _verify_md5 "$src" "$url" || { rm -f "$src"; return 1; }
     fi
 
-    # A truncated archive decompresses into a silently incomplete genome, so it
-    # is verified before use — whether we downloaded it or the user supplied it.
+    # A truncated archive would decompress into a silently incomplete genome.
     if ! gzip -t "$src" 2>/dev/null; then
         [[ "$src" == "$local_gz" ]] || rm -f "$src"
         echo "[ERROR] Corrupt gzip archive: ${src}" >&2
@@ -185,7 +161,6 @@ fetch_and_decompress() {
         return 1
     fi
 
-    # Only remove archives we placed there ourselves.
     if [[ "$src" != "$local_gz" ]]; then
         rm -f "$src"
     fi

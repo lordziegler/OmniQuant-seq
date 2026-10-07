@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Converts an SRA archive to FASTQ.
-# On success sets globals: RAW_1, RAW_2, RAW_SE
+# Sets globals: RAW_1, RAW_2, RAW_SE.
 
 step_fastq_dump() {
     local srr="$1" layout="$2"

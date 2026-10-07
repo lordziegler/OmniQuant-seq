@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# FastQC and MultiQC wrappers.
 
 step_fastqc() {
     local srr="$1" label="$2"; shift 2
@@ -10,7 +9,6 @@ step_fastqc() {
         2>&1 | tee "${LOG_DIR}/${srr}_fastqc_${label,,}.log" || true
 }
 
-# Per-sample MultiQC on clean reads immediately after trimming.
 step_multiqc_sample() {
     local srr="$1" layout="$2"
     local mqc_out="${RESULTS_DIR}/qc/multiqc/${srr}"
@@ -34,7 +32,6 @@ step_multiqc_sample() {
         2>&1 | tee "${LOG_DIR}/${srr}_multiqc.log" || true
 }
 
-# Global MultiQC over all samples at the end of the pipeline.
 step_multiqc_global() {
     local mqc_out="${RESULTS_DIR}/qc/multiqc/global"
     local raw_zips=() clean_zips=() bbduk_logs=()

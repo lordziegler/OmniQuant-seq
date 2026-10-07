@@ -1,16 +1,5 @@
 #!/usr/bin/env bash
-# Materializes genome FASTA + GTF for a species, then builds the STAR genome
-# index and the RSEM reference. Idempotent: skips species already built.
-#
-# Layout produced per species:
-#   references/<species_key>/genome.fa
-#   references/<species_key>/genes.gtf
-#   references/<species_key>/STAR_genome_index/
-#   references/<species_key>/rsem_ref.*
 
-# Download and decompress the FASTA + GTF of one species into
-# references/<species_key>/. Used both by --build-refs and by
-# `setup.sh --add-species`.
 fetch_species_references() {
     local species="$1" fna_url="$2" gtf_url="$3"
     local sp_dir="${REFERENCES_DIR}/${species}"
@@ -78,7 +67,7 @@ build_all_references() {
     done
 }
 
-# STAR index + RSEM reference paths for one species. Sets: STAR_INDEX, RSEM_REF.
+# Sets STAR_INDEX, RSEM_REF.
 resolve_reference_paths() {
     local species="$1"
     STAR_INDEX="${REFERENCES_DIR}/${species}/STAR_genome_index"

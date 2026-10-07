@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Downloads an SRA archive with configurable retry.
-# On success sets global: SRA_PATH
+# Sets global: SRA_PATH.
 
-# prefetch writes either sra/<acc>/<acc>.sra or sra/<acc>.sra depending on the
-# SRA-Toolkit version; accept both. Sets SRA_PATH and returns 0 when found.
+# The path depends on the SRA-Toolkit version.
 _locate_sra() {
     local srr="$1" candidate
     for candidate in "sra/${srr}/${srr}.sra" "sra/${srr}.sra"; do
@@ -42,8 +40,7 @@ step_prefetch() {
             return 0
         fi
 
-        # A failed attempt can leave a truncated archive behind; drop it so the
-        # next attempt cannot mistake it for a complete download.
+        # Drop a truncated archive before retrying.
         log_step "$srr" "PREFETCH" "Attempt ${attempt} failed."
         _discard_partial_sra "$srr"
 

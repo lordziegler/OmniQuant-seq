@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
-# Quality trimming with BBDuk.
-# On success sets globals: CLEAN_1, CLEAN_2, CLEAN_SE (and SINGLETONS for PE).
+# Sets globals: CLEAN_1, CLEAN_2, CLEAN_SE, SINGLETONS.
 
-# BBTools 39.81 launches the JVM with assertions enabled, and its multithreaded
-# FASTQ reader — the one it picks from t>=12 on — asserts that the third line of
-# every record is a bare "+". Both fastq-dump and fasterq-dump repeat the read
-# header there, which is valid FASTQ, so each reader thread dies on its first
-# record and BBDuk then blocks forever on an input queue nobody fills: no error,
-# no exit code, the run just stops after the BBDUK line. Turning the assertion
-# off leaves the parsing itself untouched.
+# BBTools 39.81's threaded reader (t>=12) asserts a bare "+" line; SRA tools
+# repeat the header there, and BBDuk then hangs without an error. -da disables it.
 BBDUK_JVM_ARGS=( -da )
 
-# Build the BBDuk key=value arguments into the array BBDUK_ARGS. Adapter
-# clipping is only requested when BBDUK_REF names an adapter FASTA; all values
-# come from config/pipeline.sh.
 _build_bbduk_args() {
     BBDUK_ARGS=()
     [[ -n "${BBDUK_REF:-}"   ]] && BBDUK_ARGS+=( "ref=${BBDUK_REF}" )
@@ -21,6 +12,7 @@ _build_bbduk_args() {
     [[ -n "${BBDUK_K:-}"     ]] && BBDUK_ARGS+=( "k=${BBDUK_K}" )
     [[ -n "${BBDUK_MINK:-}"  ]] && BBDUK_ARGS+=( "mink=${BBDUK_MINK}" )
     [[ -n "${BBDUK_HDIST:-}" ]] && BBDUK_ARGS+=( "hdist=${BBDUK_HDIST}" )
+    # shellcheck disable=SC2153  # set in config/pipeline.sh
     BBDUK_ARGS+=( "qtrim=${BBDUK_QTRIM}" "trimq=${BBDUK_TRIMQ}" "minlen=${BBDUK_MINLEN}" )
     return 0
 }
@@ -36,7 +28,6 @@ step_bbduk() {
     mkdir -p clean_fastq
     _build_bbduk_args
 
-    # Expected outputs, and the input/output arguments that produce them.
     local expected=() io_args=()
     if [[ "$layout" == "PAIRED" ]]; then
         expected=( "$CLEAN_1" "$CLEAN_2" )
@@ -61,9 +52,7 @@ step_bbduk() {
         2>&1 | tee "${LOG_DIR}/${srr}_bbduk.log"
     local status="${PIPESTATUS[0]}"
 
-    # BBDuk opens its gzip outputs before it reads a single record, so finding
-    # them on disk does not mean the trimming finished — only the exit status
-    # does. Without this check a crashed run hands empty FASTQ to STAR.
+    # BBDuk creates its outputs before reading, so only the exit status proves success.
     if (( status != 0 )) || ! _files_present "${expected[@]}"; then
         log_step "$srr" "ERROR" "BBDuk failed (exit ${status}). See: ${LOG_DIR}/${srr}_bbduk.log"
         return 1

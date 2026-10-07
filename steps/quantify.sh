@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# RSEM quantification from the STAR transcriptome BAM.
 
 step_rsem() {
     local srr="$1" layout="$2" species_out="$3"

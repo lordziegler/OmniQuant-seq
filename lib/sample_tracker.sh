@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Per-sample status tracking. Writes atomically via tmp + rename.
+# Rows are rewritten atomically via tmp + rename.
 
 SUMMARY_FILE="${RESULTS_DIR}/pipeline_sample_summary.tsv"
 _SUMMARY_HEADER="sample\tspecies\tlayout\ttest_mode\ttest_reads\tprefetch_status\tfastq_status\ttrimming_status\tstar_status\trsem_status\tgenes_results"
@@ -14,7 +14,6 @@ tracker_update() {
           pre="$4" fq="$5" trim="$6" star="$7" rsem="$8" genes="$9"
     local tmp="${SUMMARY_FILE}.tmp"
 
-    # Remove any existing row for this sample, then append the new one
     awk -F'\t' -v s="$sample" 'NR==1 || $1 != s' "$SUMMARY_FILE" > "$tmp"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$sample" "$species" "$layout" "$TEST_MODE" "$TEST_READS" \

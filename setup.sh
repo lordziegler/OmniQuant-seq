@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# setup.sh — interactive configurator for OmniQuant-seq.
-#
-#   bash setup.sh                 interactive menu
-#   bash setup.sh --resources     compute resources only
-#   bash setup.sh --analysis      analysis parameters only
-#   bash setup.sh --species       species menu only
-#   bash setup.sh --add-species   add one species and fetch its genome
-#
-# Writes config/pipeline.sh and config/species.sh. Nothing else is modified.
 
 set -euo pipefail
 
@@ -23,13 +14,8 @@ source "${PIPELINE_DIR}/lib/menu.sh"
 source "${PIPELINE_DIR}/lib/species_config.sh"
 source "${PIPELINE_DIR}/steps/build_references.sh"
 
-# =============================================================================
-# config/pipeline.sh knobs
-# =============================================================================
-# One row per variable: name|kind|constraint|prompt. kind is int (constraint
-# is "min max"), choice (constraint lists the accepted values), storage or
-# path. Adding a knob to a table is the whole change; _configure_params
-# prompts, validates and writes it.
+# Rows: name|kind|constraint|prompt. kind: int ("min max"), choice (accepted
+# values), storage or path.
 _ANALYSIS_PARAMS=(
     "TEST_MODE|choice|true false|Limit runs to TEST_READS reads (TEST_MODE)"
     "TEST_READS|int|1 1000000000|Reads per sample in test mode (TEST_READS)"
@@ -44,12 +30,10 @@ _ANALYSIS_PARAMS=(
     "BBDUK_REF|path||Adapter FASTA, none to skip clipping (BBDUK_REF)"
 )
 
-# Prompt for every table row given, summarise, and write the answers to
-# config/pipeline.sh once confirmed: _configure_params TITLE ROW...
+# _configure_params TITLE ROW...
 _configure_params() {
     local title="$1"; shift
-    # Not named `value`: the prompt_* helpers use that name for their own
-    # local, and printf -v would then write to theirs instead of ours.
+    # Not `value`: printf -v in the prompt_* helpers would write their own local.
     local entry name kind constraint text current new_value quoted
     local sed_args=() summary=()
 
@@ -72,7 +56,6 @@ _configure_params() {
             *)       die "Unknown parameter kind '${kind}' for ${name}." ;;
         esac
 
-        # Only ints are written bare; everything else may be empty or a word.
         quoted="$new_value"
         [[ "$kind" == int ]] || quoted="\"${new_value}\""
         sed_args+=( -e "s|^${name}=.*|${name}=${quoted}|" )
@@ -119,12 +102,6 @@ configure_analysis() {
     _configure_params "Analysis parameters" "${_ANALYSIS_PARAMS[@]}"
 }
 
-# =============================================================================
-# Species table → config/species.sh
-# =============================================================================
-
-# The species key is not a free-form label: it names a directory and routes
-# samples to references, so explain the format before asking for it.
 explain_species_key() {
     cat <<'EOF'
 
@@ -135,8 +112,7 @@ explain_species_key() {
 EOF
 }
 
-# Ask for one species entry. Sets SPECIES_NEW_KEY / _FNA / _GTF; the caller
-# decides the active flag and when to upsert.
+# Sets SPECIES_NEW_KEY, SPECIES_NEW_FNA, SPECIES_NEW_GTF.
 prompt_new_species() {
     explain_species_key
     prompt_species_key SPECIES_NEW_KEY "Species key"
@@ -144,8 +120,6 @@ prompt_new_species() {
     prompt_url         SPECIES_NEW_GTF "Annotation GTF URL (.gtf.gz)"
 }
 
-# Download + decompress the references of one species and report the outcome.
-# Shared by --add-species and the species menu, so both give the same messages.
 fetch_and_report() {
     local key="$1" fna_url="$2" gtf_url="$3"
     local sp_dir="${REFERENCES_DIR}/${key}"
@@ -186,7 +160,6 @@ show_species() {
     echo ""
 }
 
-# Read a comma-separated list of menu numbers into the named array, as indices.
 read_species_indices() {
     local -n out_ref="$1"
     local input="$2"
@@ -251,8 +224,8 @@ configure_species() {
         SP_GTF=( "${gtf[@]}" );   SP_ACTIVE=( "${active[@]}" )
     fi
 
-    # Entries added here are downloaded only after the config file is written,
-    # so an aborted session never leaves genomes on disk with no entry.
+    # Downloaded only after the config is written, so an aborted session leaves
+    # no genomes without an entry.
     local pending=() new_active
     while confirm "Add a new species?"; do
         prompt_new_species
@@ -291,9 +264,6 @@ configure_species() {
     return "$failed"
 }
 
-# =============================================================================
-# Add one species and fetch its reference files
-# =============================================================================
 add_species() {
     echo ""
     echo "========================================================"
@@ -320,9 +290,6 @@ add_species() {
     fi
 }
 
-# =============================================================================
-# CLI
-# =============================================================================
 usage() {
     cat <<'EOF'
 OmniQuant-seq setup — writes config/pipeline.sh and config/species.sh.
@@ -360,8 +327,7 @@ EOF
 }
 
 main() {
-    # The closing message is what tells the user how to recover from a failed
-    # step, so it must print before the non-zero status propagates.
+    # The next steps print even when a step failed.
     local status=0
     case "${1:-}" in
         "")               menu_main; return 0 ;;

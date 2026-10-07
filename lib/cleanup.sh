@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Per-step disk cleanup functions.
-# Each function is called immediately after its files are no longer needed.
 
 cleanup_sra() {
     local srr="$1" sra_path="$2"
@@ -10,14 +8,13 @@ cleanup_sra() {
     disk_usage "post-sra-cleanup [${srr}]"
 }
 
-# Remove the given files and log what they were: cleanup_files SRR LABEL FILE...
+# cleanup_files SRR LABEL FILE...
 cleanup_files() {
     local srr="$1" label="$2"; shift 2
     rm -f "$@"
     log_step "$srr" "CLEANUP" "${label} removed."
 }
 
-# STAR and RSEM scratch directories of one sample.
 cleanup_tmp() {
     local srr="$1"
     rm -rf "${TMP_DIR}/${srr}_star" "${TMP_DIR}/${srr}_rsem_tmp"

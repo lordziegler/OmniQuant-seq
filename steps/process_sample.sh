@@ -1,20 +1,10 @@
 #!/usr/bin/env bash
-# Per-sample orchestration: runs every stage for one accession, records the
-# outcome in the tracker, and drives the retry passes over samples.tsv.
-#
-# The individual stages live in the other steps/*.sh modules; this file only
-# decides the order, what to clean up, and what to do on failure.
 
-# Stage status variables, in tracker column order.
 _SAMPLE_STAGES=( prefetch_status fastq_status trim_status star_status rsem_status )
 
-# Accession being processed right now, or empty between samples. Read by the
-# signal handler, which is the only thing that runs outside process_sample.
+# Read by the signal handler.
 CURRENT_SRR=""
 
-# Every output a stage may have half-written for one sample. The names come
-# from the globals the step functions set; process_sample clears them per
-# sample, so this never names a previous accession's files.
 _sample_partial_files() {
     local srr="$1" species="$2"
     printf '%s\n' "${RAW_1:-}" "${RAW_2:-}" "${RAW_SE:-}" \
@@ -23,8 +13,6 @@ _sample_partial_files() {
                   "${RESULTS_DIR}/rsem/${species}/${srr}.isoforms.results"
 }
 
-# Record a sample that stopped early: the failed stage keeps its FAILED value,
-# stages that never ran become NA.
 _record_sample_failure() {
     local srr="$1" species="$2" layout="$3" stage="$4"
     local var
@@ -34,9 +22,8 @@ _record_sample_failure() {
         fi
     done
 
-    # Every failure path routes through here, so this is the one place that has
-    # to drop what the failed stage left half-written — otherwise the next pass
-    # reads a truncated FASTQ or BAM as if it were complete.
+    # Every failure path ends here: drop half-written output so the next pass
+    # cannot take it for complete.
     local partials=()
     mapfile -t partials < <(_sample_partial_files "$srr" "$species")
     cleanup_on_error "$srr" "${partials[@]}"
@@ -47,8 +34,6 @@ _record_sample_failure() {
     log_step "$srr" "ERROR" "Sample stopped at ${stage}."
 }
 
-# SIGINT/SIGTERM handler, registered by run.sh. A Ctrl-C between stages leaves
-# the same partial output a failed stage does, so it gets the same treatment.
 on_interrupt() {
     echo ""
     echo "[INTERRUPT] Signal received — cleaning up the sample in progress ..."
@@ -67,8 +52,7 @@ process_sample() {
     local prefetch_status="PENDING" fastq_status="PENDING" trim_status="PENDING" \
           star_status="PENDING" rsem_status="PENDING"
 
-    # The stage functions communicate through these globals; clear them so a
-    # failure early in this sample can never delete the previous sample's files.
+    # Reset so an early failure can never delete the previous sample's files.
     CURRENT_SRR="$srr"; CURRENT_SPECIES="$species"
     RAW_1=""; RAW_2=""; RAW_SE=""
     CLEAN_1=""; CLEAN_2=""; CLEAN_SE=""; SINGLETONS=""
@@ -134,14 +118,11 @@ process_sample() {
     CURRENT_SRR=""
 }
 
-# Walk samples.tsv up to PIPELINE_RETRY_PASSES times; samples already marked
-# complete in the tracker are skipped, so an interrupted run resumes cleanly.
 run_sample_loop() {
     local pass srr species layout line
     local rows=()
 
-    # The table is read up front: a stage that consumes stdin (prefetch, STAR)
-    # would otherwise eat the remaining lines of the loop's input.
+    # Read up front: prefetch and STAR consume stdin.
     mapfile -t rows < "$SAMPLES_TSV"
 
     for (( pass = 1; pass <= PIPELINE_RETRY_PASSES; pass++ )); do
@@ -151,8 +132,7 @@ run_sample_loop() {
         echo "============================================================"
 
         for line in "${rows[@]}"; do
-            # Trailing `_` swallows the metadata columns; without it they
-            # would land in $layout and a PAIRED run would be read as SINGLE.
+            # `_` takes the metadata columns, which would otherwise land in $layout.
             IFS=$'\t' read -r srr species layout _ <<< "$line"
             [[ "$srr" == "SRR" || -z "$srr" ]] && continue
 

@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-# Post-processing: delegates to Python helpers for matrix building,
-# then runs global MultiQC.
 
-# Print the head of the merged expression matrix, so every run ends with
-# visible evidence that the inner join produced data. Never fatal: a missing
-# matrix is reported and the run still finishes.
+# Never fatal: a missing matrix only warns.
 preview_expression_matrix() {
     local matrix="${RESULTS_DIR}/tables/gene_expression_matrix.tsv"
     local lines="${PREVIEW_LINES:-10}"

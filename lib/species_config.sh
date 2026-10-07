@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# Read/modify/write config/species.sh.
-#
-# On disk each entry is a single string: "key|fna_url|gtf_url|active",
-# optionally split over several lines with backslash continuations. In memory
-# the table is held as four parallel arrays so entries can be edited by index:
-#   SP_KEYS  SP_FNA  SP_GTF  SP_ACTIVE
+# config/species.sh entries "key|fna_url|gtf_url|active" <-> parallel arrays
+# SP_KEYS SP_FNA SP_GTF SP_ACTIVE.
 
-# Split one "key|fna|gtf|active" entry into the caller's four named variables,
-# stripping the whitespace and backslashes introduced by line continuations.
 species_entry_split() {
     local __entry="$1"
     local __out_vars=( "$2" "$3" "$4" "$5" )
@@ -21,12 +15,10 @@ species_entry_split() {
         __value="${__value%"${__value##*[![:space:]]}"}"   # rtrim
         printf -v "${__out_vars[$__i]}" '%s' "$__value"
     done
-    # An entry without an explicit flag is active.
     [[ -z "${!5}" ]] && printf -v "$5" '%s' "true"
     return 0
 }
 
-# Print the keys of every entry marked active in the current SPECIES_CONFIG.
 species_config_active_keys() {
     local entry key fna gtf active
     for entry in "${SPECIES_CONFIG[@]}"; do
@@ -36,7 +28,6 @@ species_config_active_keys() {
     return 0
 }
 
-# Load a species config file into the SP_* arrays.
 species_config_load() {
     local file="$1"
     SP_KEYS=(); SP_FNA=(); SP_GTF=(); SP_ACTIVE=()
@@ -54,7 +45,6 @@ species_config_load() {
     done
 }
 
-# Echo the index of a species key in SP_KEYS, or -1 when absent.
 species_config_index() {
     local key="$1" i
     for i in "${!SP_KEYS[@]}"; do
@@ -63,11 +53,10 @@ species_config_index() {
     echo "-1"
 }
 
-# Insert or replace one entry. Sets SPECIES_CONFIG_LAST_ACTION to "added" or
-# "updated" — the caller must not run this in a subshell, or the arrays it
-# mutates are discarded.
+# Sets SPECIES_CONFIG_LAST_ACTION. Not in a subshell: the arrays would be lost.
 SPECIES_CONFIG_LAST_ACTION=""
 
+# shellcheck disable=SC2034  # read by setup.sh
 species_config_upsert() {
     local key="$1" fna="$2" gtf="$3" active="${4:-true}"
     local idx; idx="$(species_config_index "$key")"
@@ -82,7 +71,6 @@ species_config_upsert() {
     fi
 }
 
-# Write the SP_* arrays back out as a sourceable bash file.
 species_config_save() {
     local file="$1" i
     local tmp="${file}.tmp"

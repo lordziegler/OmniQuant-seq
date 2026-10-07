@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# Interactive entry menu, shown by run.sh and setup.sh when they are called
-# with no arguments (or with --interactive).
-#
-# The menu owns no pipeline logic: every option re-enters one of the two entry
-# points with the flag that already implements it, so the scriptable CLI and
-# the menu can never drift apart.
+# Every option re-runs an entry point with its flag, so menu and CLI cannot drift.
 
-# Run one entry point and come back to the menu, reporting a failure instead of
-# aborting the whole session (set -e would otherwise kill the menu).
+# A failing option must not end the menu.
 menu_dispatch() {
     local status=0
     echo ""
@@ -39,8 +33,6 @@ menu_main() {
     local choice
     while true; do
         menu_show
-        # A closed stdin (piped or redirected input) ends the menu instead of
-        # spinning forever on EOF.
         read -rp " Option [1-8]: " choice || { echo ""; return 0; }
         case "$choice" in
             1) menu_dispatch "${PIPELINE_DIR}/setup.sh" --resources ;;

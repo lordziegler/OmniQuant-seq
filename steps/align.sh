@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# STAR alignment. On success sets global: BAM_PATH.
+# Sets global: BAM_PATH.
 
-# ENCODE long-RNA-seq standard flags. Same settings for every organism —
-# organism-dependent knobs (STAR_OVERHANG, STAR_SA_INDEX_NBASES) live in
-# config/pipeline.sh and are applied at index-build time.
+# ENCODE long-RNA-seq options.
 _STAR_FLAGS=(
     --outSAMtype              BAM Unsorted
     --outSAMunmapped          Within
@@ -34,7 +32,6 @@ step_star() {
         reads=( "$CLEAN_SE" )
     fi
 
-    # BBDuk writes gzipped output; keep the plain-file path working too.
     local read_files_command="cat"
     [[ "${reads[0]}" == *.gz ]] && read_files_command="zcat"
 
@@ -57,7 +54,7 @@ step_star() {
         return 1
     fi
 
-    # Keep the mapping stats where build_matrix.py looks for them.
+    # build_matrix.py reads it from LOG_DIR.
     if [[ -f "${out_prefix}Log.final.out" ]]; then
         cp "${out_prefix}Log.final.out" "${LOG_DIR}/${srr}_STAR_Log.final.out"
     fi
@@ -67,10 +64,7 @@ step_star() {
     log_step "$srr" "STAR" "BAM: ${BAM_PATH}"
 }
 
-# GeneCounts costs nothing extra — STAR already walks the annotation for
-# TranscriptomeSAM — and tells us whether a library is stranded, which the
-# pipeline previously had no way to detect. Sets globals: STRAND_RATIO,
-# FORWARD_PROB (RSEM's --forward-prob for the upcoming quantify step).
+# Sets STRAND_RATIO and FORWARD_PROB (RSEM --forward-prob).
 _infer_strandedness() {
     local srr="$1" gene_counts="$2"
     STRAND_RATIO="NA"

@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-"""Parses an NCBI SRA RunTable (CSV or XLSX) and writes samples.tsv."""
-
 import argparse
 import csv
 import re
@@ -11,9 +9,7 @@ from pathlib import Path
 ACCESSION_RE = re.compile(r"^[SED]RR\d+$")
 RUN_KEYS = ("Run", "Run Accession", "RunAccession", "Accession")
 
-# Sample-sheet columns written after LAYOUT, each mapped to the RunTable fields
-# it may come from; the first informative one wins. Submitters spread the same
-# attribute over differently named BioSample fields.
+# Column -> RunTable fields it may come from; the first informative one wins.
 METADATA = {
     "TISSUE": ("tissue", "tissue_type", "Organism_part"),
     "PLATFORM": ("Platform",),
@@ -24,8 +20,7 @@ METADATA = {
     "TREATMENT": ("treatment", "Diet"),
 }
 
-# INSDC null placeholders. Kept out of the sample sheet so a design formula
-# never sees "missing" as a factor level.
+# INSDC placeholders, written as NA so they never become a factor level.
 _NULLS = {
     "",
     "missing",
@@ -74,9 +69,8 @@ def _get(row: dict, *keys: str) -> str:
 
 
 def _meta(row: dict, keys: tuple) -> str:
-    """First non-placeholder value among `keys`, or NA. Never empty: bash reads
-    samples.tsv with IFS=tab, which collapses consecutive tabs. Inner whitespace
-    is collapsed so free text cannot carry a tab or newline into the TSV."""
+    # Never empty (bash reads the TSV with IFS=tab, which collapses empty
+    # fields) and whitespace-collapsed (no tab or newline from free text).
     for k in keys:
         v = _get(row, k)
         if v.lower() not in _NULLS:
@@ -85,9 +79,6 @@ def _meta(row: dict, keys: tuple) -> str:
 
 
 def _derive_key(organism: str) -> str | None:
-    """Turn a scientific name into a Genus_species key, matching the naming
-    convention used by SPECIES_CONFIG in config/species.sh. Works for any taxon:
-    'Helicoverpa armigera' -> 'Helicoverpa_armigera'."""
     tokens = organism.replace("_", " ").split()
     if len(tokens) >= 2:
         return f"{tokens[0].capitalize()}_{tokens[1].lower()}"
@@ -97,10 +88,6 @@ def _derive_key(organism: str) -> str | None:
 
 
 def _species(organism: str, allowed: set | None, fallback: str | None) -> str | None:
-    """Resolve a RunTable row to a species key. The key is derived from the
-    Organism field (no hardcoded species list); `fallback` is used when the
-    field is empty or unresolvable. When `allowed` is given, only keys in that
-    set are kept, so a run processes only the species you have references for."""
     key = _derive_key(organism) or fallback
     return key if key and (not allowed or key in allowed) else None
 
@@ -255,8 +242,6 @@ def main() -> None:
             }
         )
 
-    # A requested accession that silently drops out would leave the user
-    # believing it was processed.
     missing = sorted(wanted - {r["SRR"] for r in clean}) if wanted else []
     if missing:
         sys.exit(

@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# Interactive input helpers shared by setup.sh and lib/menu.sh.
-# Every helper validates and re-asks until the value is usable, so callers
-# never have to check what they read. A closed stdin is not a usable answer
-# either: helpers with a current value fall back to it, and the two that have
-# none abort instead of looping forever on EOF.
+# Each helper re-asks until valid. On EOF it keeps the current value, or aborts
+# when there is none.
 
-# Read an integer in [min, max]; empty input keeps the current value.
 prompt_int() {
     local var_name="$1" prompt_text="$2" current="$3" min="$4" max="$5"
     local value
-    # A config written on a larger machine must survive "press Enter to keep
-    # the current value", even when it exceeds what this host detects.
+    # Keep a current value above what this host detects.
     (( current > max )) && max="$current"
     while true; do
         read -rp "  ${prompt_text} [current: ${current}, range: ${min}–${max}]: " value \
@@ -24,7 +19,6 @@ prompt_int() {
     done
 }
 
-# Read a storage size such as 100G or 1T; empty input keeps the current value.
 prompt_storage() {
     local var_name="$1" prompt_text="$2" current="$3"
     local value
@@ -38,7 +32,6 @@ prompt_storage() {
     fi
 }
 
-# Read one of a fixed set of values; empty input keeps the current one.
 prompt_choice() {
     local var_name="$1" prompt_text="$2" current="$3"; shift 3
     local options=( "$@" ) value opt
@@ -55,8 +48,7 @@ prompt_choice() {
     done
 }
 
-# Read a path to an existing file, or "none" to clear it. The value is written
-# into config/pipeline.sh through a sed replacement, so | and & are rejected.
+# | and & are rejected: the value is written through sed.
 prompt_path() {
     local var_name="$1" prompt_text="$2" current="$3"
     local value
@@ -87,9 +79,7 @@ prompt_url() {
     done
 }
 
-# Species keys are Genus_species: they name the references/ subdirectory and
-# must match the key parse_runtable.py derives from the RunTable Organism
-# field, hence the mandatory underscore.
+# Must match the key parse_runtable.py derives from Organism.
 prompt_species_key() {
     local var_name="$1" prompt_text="$2"
     local value

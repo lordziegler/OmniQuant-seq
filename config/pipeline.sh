@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Central configuration — edit this file before each run.
+# shellcheck disable=SC2034  # read by the modules that source this file
 
-# --- Compute resources -------------------------------------------------------
 THREADS_DOWNLOAD=8
 THREADS_FASTQC=8
 THREADS_TRIM=8
@@ -11,55 +10,42 @@ MAX_MEMORY_GB=32
 MAX_SRA_SIZE="100G"
 DISK_WARN_GB=20
 
-# --- Paths -------------------------------------------------------------------
 REFERENCES_DIR="references"
 LOG_DIR="logs"
 TMP_DIR="tmp"
 RESULTS_DIR="results"
 SAMPLES_TSV="${RESULTS_DIR}/samples.tsv"
 
-# --- RunTable parsing --------------------------------------------------------
-# Species keys come from the RunTable's Organism field (Genus species ->
-# Genus_species) and are filtered against the active entries in species.sh.
-# SPECIES_FALLBACK is used only for rows whose Organism field is empty or
-# unresolvable (e.g. single-species datasets). Leave empty to disable.
+# Species key for RunTable rows with an empty Organism; empty disables it.
 SPECIES_FALLBACK=""
 
-# --- Run behaviour -----------------------------------------------------------
 TEST_MODE=false
 TEST_READS=100000
 PIPELINE_RETRY_PASSES=3
 PREFETCH_RETRIES=5
 PREFETCH_RETRY_SLEEP=30
 
-# --- Example run -------------------------------------------------------------
-# Dataset shipped with the repository and used by run.sh --example.
+# Used by run.sh --example.
 EXAMPLE_SPECIES="Helicoverpa_armigera"
 EXAMPLE_READS=25000
 
-# --- Result preview ----------------------------------------------------------
-# At the end of a run the first PREVIEW_LINES lines of the expression matrix
-# are printed, as a quick check that the inner join produced data.
-# Disable with ENABLE_PREVIEW=false or run.sh --no-preview.
+# Rows of the expression matrix printed at the end of a run.
 ENABLE_PREVIEW=true
 PREVIEW_LINES=10
 
-# --- STAR --------------------------------------------------------------------
 STAR_OVERHANG=99
 STAR_SA_INDEX_NBASES=12
 
-# --- BBDuk -------------------------------------------------------------------
 BBDUK_QTRIM="rl"
 BBDUK_TRIMQ=10
 BBDUK_MINLEN=36
-# Adapter FASTA — leave empty to skip adapter clipping.
+# Adapter FASTA; empty skips adapter clipping.
 BBDUK_REF=""
 BBDUK_KTRIM=""
 BBDUK_K=""
 BBDUK_MINK=""
 BBDUK_HDIST=""
 
-# --- Cleanup -----------------------------------------------------------------
 CLEAN_SRA_AFTER_FASTQ=true
 CLEAN_RAW_FASTQ_AFTER_RSEM=true
 CLEAN_FASTQ_AFTER_RSEM=true

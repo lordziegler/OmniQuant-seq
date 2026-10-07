@@ -22,9 +22,7 @@ def cochran(population: int, margin: float = 0.05, p: float = 0.5) -> int:
     return min(population, math.ceil(n0 / (1 + (n0 - 1) / population)))
 
 
-# STAR's ideal sjdbOverhang is max(read length) - 1. The 95th percentile
-# instead of the max keeps one mislabelled run (a PAIRED spot length read as
-# SINGLE doubles it) from setting the index for everyone.
+# 95th percentile, not max: one mislabelled run must not set the index for all.
 def overhang(mate_lengths: list, coverage: float = 0.95) -> int:
     ranked = sorted(mate_lengths)
     return math.ceil(ranked[math.ceil(coverage * len(ranked)) - 1]) - 1

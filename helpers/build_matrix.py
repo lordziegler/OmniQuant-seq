@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-"""Builds gene expression matrix and QC tables from RSEM/STAR/BBDuk outputs."""
-
 import argparse
 import csv
 import re
@@ -62,9 +60,7 @@ def expression_matrix(rsem_dir: Path, output: Path) -> None:
 
 
 def _strand_ratio(log_dir: Path, sample: str) -> str:
-    """fwd/(fwd+rev) from STAR's ReadsPerGene.out.tab (--quantMode GeneCounts),
-    columns 3/4 after the 4 header rows. Same value used to set RSEM's
-    --forward-prob at quantification time (see steps/align.sh:_infer_strandedness)."""
+    # Same ratio steps/align.sh uses to set RSEM --forward-prob.
     f = log_dir / f"{sample}_STAR_ReadsPerGene.out.tab"
     if not f.exists():
         return "NA"
@@ -144,8 +140,7 @@ def bbduk_qc(log_dir: Path, output: Path) -> None:
             if not m:
                 continue
             lbl = m.group("label").replace(" ", "_")
-            # BBDuk reports no percentage for the Input line — it is the 100%
-            # baseline — so those columns do not exist. Only fill known ones.
+            # The Input line has no percentage columns.
             for column, value in (
                 (f"{lbl}_reads", m.group("reads")),
                 (f"{lbl}_bases", m.group("bases")),

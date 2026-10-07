@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Unit tests for the pure-bash and Python layers.
-# No bioinformatics tool and no network access is required.
-#
-#   bash tests/test_pipeline.sh
+# bash tests/test_pipeline.sh — no bioinformatics tools, no network.
+# shellcheck disable=SC2154,SC2030  # printf -v targets; subshells isolate tests
 set -euo pipefail
 
 PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,7 +32,7 @@ assert_eq() {
     fi
 }
 
-# A function that calls exit 1 must run in a subshell so it can't kill the test.
+# Runs in a subshell: the function may call exit.
 assert_fails() {
     local desc="$1"; shift
     if ! ( "$@" >/dev/null 2>&1 ); then
@@ -57,15 +55,12 @@ assert_succeeds() {
     fi
 }
 
-# --- require_file ------------------------------------------------------------
 assert_fails "require_file missing" require_file "/no/such/file" ""
 
 tmpf="$(mktemp)"
 assert_eq "require_file exists" "$(require_file "$tmpf" "" && echo ok)" "ok"
 rm -f "$tmpf"
 
-# --- species_config ----------------------------------------------------------
-# Entries are written with backslash continuations; splitting must strip them.
 species_entry_split "Genus_species|\
 http://example.org/g.fna.gz|\
 http://example.org/g.gtf.gz|\
@@ -87,7 +82,6 @@ assert_eq "species_config_upsert: existing entry" "$SPECIES_CONFIG_LAST_ACTION" 
 assert_eq "species_config_upsert: no duplicate row" "${#SP_KEYS[@]}" "1"
 assert_eq "species_config_upsert: value replaced"   "${SP_FNA[0]}"   "b.fna.gz"
 
-# Round-trip: what save writes, load must read back identically.
 species_config_save "${tmpd}/species.sh"
 SP_KEYS=(); SP_FNA=(); SP_GTF=(); SP_ACTIVE=()
 species_config_load "${tmpd}/species.sh"
@@ -97,9 +91,6 @@ assert_eq "species_config save/load: active" "${SP_ACTIVE[0]}" "false"
 assert_eq "species_config_index: absent key" "$(species_config_index Nope)" "-1"
 rm -rf "$tmpd"
 
-# --- prompt helpers ----------------------------------------------------------
-# A piped or redirected run reaches EOF: helpers with a current value must keep
-# it instead of aborting the whole setup or re-asking forever.
 prompt_int p_threads "Threads" 8 1 16 </dev/null
 assert_eq "prompt_int: EOF keeps the current value" "$p_threads" "8"
 
@@ -112,18 +103,13 @@ assert_eq "prompt_choice: EOF keeps the current value" "$p_qtrim" "rl"
 prompt_path p_adapters "Adapters" "" </dev/null
 assert_eq "prompt_path: EOF keeps the current value" "$p_adapters" ""
 
-# A config written on a larger machine must survive "press Enter to keep it".
 prompt_int p_ram "RAM" 32 1 7 <<< ""
 assert_eq "prompt_int: Enter keeps a current value above the detected maximum" \
     "$p_ram" "32"
 
-# Without a current value there is nothing to fall back to, so EOF must abort
-# with a message rather than re-ask forever.
 assert_fails "prompt_url: EOF aborts instead of looping" \
     bash -c "source '${PIPELINE_DIR}/lib/utils.sh'; source '${PIPELINE_DIR}/lib/prompt.sh'; prompt_url u 'URL' </dev/null"
 
-# --- input detection ----------------------------------------------------------
-# One active species: a local FASTA + GTF override the download URLs.
 tmpd="$(mktemp -d)"
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 touch "${tmpd}/genome.fna.gz" "${tmpd}/annotation.gtf.gz" "${tmpd}/SraRunTable.csv"
@@ -134,30 +120,24 @@ assert_eq "detect_run_table: RUN_TABLE set" "$RUN_TABLE" "${tmpd}/SraRunTable.cs
 assert_eq "detect_local_references: FNA_FILE set"  "$FNA_FILE"  "${tmpd}/genome.fna.gz"
 assert_eq "detect_local_references: GTF_FILE set"  "$GTF_FILE"  "${tmpd}/annotation.gtf.gz"
 
-# Two active species: a single local genome cannot be assigned, so it is ignored
-# rather than silently used for every organism.
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" "Danio_rerio|f|g|true" )
 RUN_TABLE=""
 detect_local_references "$tmpd" >/dev/null
 detect_run_table "$tmpd" >/dev/null
 assert_eq "detect_local_references: local genome ignored for multi-species" "$FNA_FILE" ""
 
-# --example pins its own species, so a stray genome in the working directory
-# must never be adopted as the demo's reference.
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 EXAMPLE_MODE=true
 detect_local_references "$tmpd" >/dev/null
 EXAMPLE_MODE=false
 assert_eq "detect_local_references: local genome refused in example mode" "$FNA_FILE" ""
 
-# A second RunTable is ambiguous and must abort.
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 touch "${tmpd}/other_RunTable.csv"
 RUN_TABLE=""
 assert_fails "detect_run_table: two RunTables abort" detect_run_table "$tmpd"
 rm -rf "$tmpd"
 
-# References are optional — a RunTable alone is a valid input set.
 tmpd="$(mktemp -d)"
 touch "${tmpd}/SraRunTable.csv"
 RUN_TABLE=""
@@ -167,7 +147,6 @@ assert_eq "detect_local_references: no local genome needed" "$FNA_FILE" ""
 rm -rf "$tmpd"
 unset RUN_TABLE
 
-# --- parse_runtable.py -------------------------------------------------------
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/SraRunTable.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -192,10 +171,7 @@ got_species="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/samples.tsv")"
 assert_eq "parse_runtable: species key from Organism" "$got_species" "Helicoverpa_armigera"
 rm -rf "$tmpd"
 
-# --- sample_runtable.py ------------------------------------------------------
-# 20 runs of 2x150 plus one PAIRED run mislabelled SINGLE (spot 300 read as one
-# 300 nt mate): Cochran gives n=20 of N=21, and the 95th percentile keeps the
-# mislabelled run from pushing STAR_OVERHANG to 299.
+# 21 runs of 2x150, one mislabelled SINGLE: n=20 of N=21, overhang 149 not 299.
 tmpd="$(mktemp -d)"
 {
     echo "Run,AvgSpotLen"
@@ -217,8 +193,6 @@ assert_eq "sample_runtable: overhang ignores a mislabelled outlier" \
     "$(grep -o 'census) = [0-9]*' <<< "$sr_out")" "census) = 149"
 rm -rf "$tmpd"
 
-# Any organism must resolve to a Genus_species key derived from the Organism
-# field, so the pipeline is not tied to a fixed taxon.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/generic.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -232,7 +206,6 @@ got_generic="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/generic.tsv" 2>/dev/null ||
 assert_eq "parse_runtable: derives key for any organism" "$got_generic" "Danio_rerio"
 rm -rf "$tmpd"
 
-# --species restricts the output to the configured species.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/multi.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -251,7 +224,6 @@ multi_sp="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/multi.tsv" 2>/dev/null || true
 assert_eq "parse_runtable: --species kept the right species" "$multi_sp" "Helicoverpa_armigera"
 rm -rf "$tmpd"
 
-# --fallback covers rows with an empty or unresolvable Organism field.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/fallback.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -266,7 +238,6 @@ fb_sp="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/fallback.tsv" 2>/dev/null || true
 assert_eq "parse_runtable: --fallback assigns key when Organism is empty" "$fb_sp" "My_species"
 rm -rf "$tmpd"
 
-# GENOMIC is excluded by default and only admitted behind --allow-genomic-source.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/genomic.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -286,8 +257,6 @@ gen_rows2="$(awk 'NR>1' "${tmpd}/genomic.tsv" 2>/dev/null | wc -l | tr -d ' ' ||
 assert_eq "parse_runtable: --allow-genomic-source admits it" "$gen_rows2" "1"
 rm -rf "$tmpd"
 
-# An unresolvable layout is excluded, not silently assigned PAIRED, unless the
-# caller opts in with --assume-layout.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/nolayout.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -307,7 +276,6 @@ nl_layout="$(awk -F'\t' 'NR==2{print $3}' "${tmpd}/nolayout.tsv" 2>/dev/null || 
 assert_eq "parse_runtable: --assume-layout includes it with the given layout" "$nl_layout" "SINGLE"
 rm -rf "$tmpd"
 
-# --star-overhang warns without altering the output.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/spotlen.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism,AvgSpotLen
@@ -323,8 +291,6 @@ ov_rows="$(awk 'NR>1' "${tmpd}/spotlen.tsv" 2>/dev/null | wc -l | tr -d ' ' || e
 assert_eq "parse_runtable: --star-overhang keeps the sample" "$ov_rows" "1"
 rm -rf "$tmpd"
 
-# Sample metadata: a placeholder in the first alias falls through to the next,
-# and an empty field becomes NA so the TSV never has empty cells.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/meta.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism,tissue,tissue_type,Platform,BioProject,sex
@@ -340,8 +306,6 @@ assert_eq "parse_runtable: metadata skips placeholders and fills NA" \
     "Gut|ILLUMINA|PRJNA579505|NA"
 rm -rf "$tmpd"
 
-# --runs (behind run.sh --manual) keeps only the named accessions, and aborts
-# on one that is absent rather than silently processing nothing.
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/runs.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -358,10 +322,6 @@ assert_fails "parse_runtable: --runs aborts on an accession filtered out" \
     --input "${tmpd}/runs.csv" --output "${tmpd}/runs2.tsv" --runs SRR910001,SRR910003
 rm -rf "$tmpd"
 
-# --- Bundled example RunTable ------------------------------------------------
-# run.sh --example depends on this file parsing to exactly 2 usable samples,
-# both Helicoverpa_armigera/PAIRED, so the demo's expression matrix exercises
-# a real inner join across samples.
 tmpd="$(mktemp -d)"
 SPECIES_CONFIG=( "Helicoverpa_armigera|f|g|true" )
 RUN_TABLE="${PIPELINE_DIR}/examples/SraRunTable.example.csv"
@@ -379,7 +339,6 @@ assert_eq "example RunTable: layout"   \
 rm -rf "$tmpd"
 unset RUN_TABLE SAMPLES_TSV
 
-# --- parse_samples: restricts output to the active SPECIES_CONFIG species -----
 tmpd="$(mktemp -d)"
 cat > "${tmpd}/runtable.csv" <<'CSV'
 Run,Assay Type,LibrarySource,LibraryLayout,Organism
@@ -399,11 +358,6 @@ assert_eq "parse_samples: kept the active species" "$ps_sp" "Helicoverpa_armiger
 rm -rf "$tmpd"
 unset SPECIES_CONFIG RUN_TABLE SAMPLES_TSV
 
-# --- build_matrix.py: strand_ratio from STAR's GeneCounts output, and the ---
-# --- inner join across samples in the expression matrix ---------------------
-# Synthetic fixtures on purpose — this is a fast offline unit test, not a
-# demonstration on real data. The real 3-sample demo lives in
-# examples/SraRunTable.example.csv, run via `bash run.sh --example`.
 tmpd="$(mktemp -d)"
 mkdir -p "${tmpd}/logs" "${tmpd}/rsem/SRR1" "${tmpd}/rsem/SRR2"
 cat > "${tmpd}/logs/SRR1_STAR_Log.final.out" <<'LOG'
@@ -418,9 +372,7 @@ gene1	100	90	10
 gene2	100	90	10
 TAB
 
-# Two samples with partially overlapping gene sets: geneA is SRR1-only,
-# geneD is SRR2-only, geneB/geneC are shared. Only the shared genes must
-# survive the inner join in expression_matrix().
+# geneA only in SRR1, geneD only in SRR2.
 cat > "${tmpd}/rsem/SRR1/SRR1.genes.results" <<'TSV'
 gene_id	transcript_id(s)	length	effective_length	expected_count	TPM	FPKM
 geneA	geneA_t1	1000	900	10	5.0	6.0
@@ -458,9 +410,6 @@ assert_eq "build_matrix: shared gene keeps its per-sample TPM/FPKM values" \
 
 rm -rf "$tmpd"
 
-# --- CLI ---------------------------------------------------------------------
-# --help must work without any external tool installed, so it has to be handled
-# before the pre-flight check.
 run_help="$(bash "${PIPELINE_DIR}/run.sh" --help)"
 for flag in --build-refs --test --full --example --manual --interactive --no-preview; do
     assert_eq "run.sh --help documents ${flag}" \
@@ -477,9 +426,6 @@ for flag in --resources --species --add-species --interactive; do
         "$(grep -q -- "$flag" <<< "$setup_help" && echo yes || echo no)" "yes"
 done
 
-# --- setup.sh --analysis -----------------------------------------------------
-# Drives the real script over a throwaway copy of the repo, so the assertion is
-# that config/pipeline.sh was rewritten — not that a function was called.
 tmpd="$(mktemp -d)"
 mkdir -p "${tmpd}/config" "${tmpd}/lib" "${tmpd}/steps"
 cp "${PIPELINE_DIR}/setup.sh" "$tmpd/"
@@ -487,7 +433,7 @@ cp "${PIPELINE_DIR}"/config/*.sh "${tmpd}/config/"
 cp "${PIPELINE_DIR}"/lib/*.sh    "${tmpd}/lib/"
 cp "${PIPELINE_DIR}"/steps/*.sh  "${tmpd}/steps/"
 
-# One answer per _ANALYSIS_PARAMS row, in order; empty keeps the current value.
+# One answer per _ANALYSIS_PARAMS row; empty keeps the current value.
 printf 'true\n5000\n\n\n\n120\n10\nf\n20\n50\nnone\ny\n' \
     | bash "${tmpd}/setup.sh" --analysis >/dev/null 2>&1
 
@@ -502,7 +448,6 @@ assert_eq "setup --analysis: empty answer keeps the current value" \
 assert_eq "setup --analysis: 'none' clears the adapter path" \
     "$(grep '^BBDUK_REF=' "${tmpd}/config/pipeline.sh")" 'BBDUK_REF=""'
 
-# Declining the confirmation must leave the file untouched.
 cp "${PIPELINE_DIR}/config/pipeline.sh" "${tmpd}/config/pipeline.sh"
 printf 'true\n5000\n\n\n\n120\n10\nf\n20\n50\nnone\nn\n' \
     | bash "${tmpd}/setup.sh" --analysis >/dev/null 2>&1
@@ -510,9 +455,6 @@ assert_eq "setup --analysis: declining writes nothing" \
     "$(diff -q "${PIPELINE_DIR}/config/pipeline.sh" "${tmpd}/config/pipeline.sh" >/dev/null && echo same)" "same"
 rm -rf "$tmpd"
 
-# --- Interactive menu --------------------------------------------------------
-# The menu must reject junk, keep asking, and leave on option 8 — all without
-# running any pipeline command.
 EXAMPLE_SPECIES="Helicoverpa_armigera"
 menu_out="$(printf '99\nzz\n\n8\n' | menu_main)"
 assert_eq "menu: rejects a non-listed number" \
@@ -524,11 +466,9 @@ assert_eq "menu: option 8 exits" \
 assert_eq "menu: redraws after every answer" \
     "$(grep -c '\[8\] Exit' <<< "$menu_out")" "4"
 
-# Closed stdin must end the menu instead of looping on EOF.
 assert_succeeds "menu: exits on EOF" bash -c \
     "PIPELINE_DIR='${PIPELINE_DIR}' EXAMPLE_SPECIES=X; source '${PIPELINE_DIR}/lib/menu.sh'; menu_main </dev/null"
 
-# --- Expression matrix preview ----------------------------------------------
 tmpd="$(mktemp -d)"
 RESULTS_DIR="$tmpd"
 mkdir -p "${tmpd}/tables"
@@ -548,7 +488,6 @@ ENABLE_PREVIEW=false
 assert_eq "preview: ENABLE_PREVIEW=false prints nothing" \
     "$(preview_expression_matrix)" ""
 
-# A missing matrix warns but must never abort the run.
 ENABLE_PREVIEW=true
 rm -f "${tmpd}/tables/gene_expression_matrix.tsv"
 assert_eq "preview: missing matrix warns" \
@@ -557,9 +496,6 @@ assert_succeeds "preview: missing matrix is not fatal" preview_expression_matrix
 rm -rf "$tmpd"
 unset RESULTS_DIR ENABLE_PREVIEW PREVIEW_LINES
 
-# --- Failure cleanup ---------------------------------------------------------
-# A failed stage must drop its own half-written output and must never touch a
-# different sample's files.
 tmpd="$(mktemp -d)"
 RESULTS_DIR="$tmpd"
 TMP_DIR="${tmpd}/tmp"
@@ -592,9 +528,6 @@ assert_eq "failure cleanup: records the failed stage" \
 rm -rf "$tmpd"
 unset RESULTS_DIR TMP_DIR RAW_1 RAW_2 RAW_SE CLEAN_1 CLEAN_2 CLEAN_SE SINGLETONS
 
-# --- reference integrity -----------------------------------------------------
-# A truncated archive must never reach gunzip: it would produce a silently
-# incomplete genome.
 tmpd="$(mktemp -d)"
 printf 'not gzip at all' > "${tmpd}/broken.fna.gz"
 assert_fails "fetch_and_decompress: rejects a corrupt archive" \
@@ -602,13 +535,11 @@ assert_fails "fetch_and_decompress: rejects a corrupt archive" \
 assert_eq "fetch_and_decompress: corrupt archive left no output" \
     "$([[ -f "${tmpd}/genome.fa" ]] && echo yes || echo no)" "no"
 
-# A user-supplied archive is never deleted, even when it is the corrupt one.
 assert_fails "fetch_and_decompress: rejects a corrupt local archive" \
     fetch_and_decompress "${tmpd}/g2.fa" "${tmpd}/broken.fna.gz" ""
 assert_eq "fetch_and_decompress: user-supplied archive is kept" \
     "$([[ -f "${tmpd}/broken.fna.gz" ]] && echo yes || echo no)" "yes"
 
-# A valid archive still goes through.
 printf '>chr1\nACGT\n' | gzip > "${tmpd}/good.fna.gz"
 assert_succeeds "fetch_and_decompress: accepts a valid archive" \
     fetch_and_decompress "${tmpd}/good.fa" "${tmpd}/good.fna.gz" ""
@@ -616,7 +547,6 @@ assert_eq "fetch_and_decompress: decompressed content" \
     "$(head -1 "${tmpd}/good.fa" 2>/dev/null)" ">chr1"
 rm -rf "$tmpd"
 
-# --- checksum verification against a published md5checksums.txt (M9) --------
 tmpd="$(mktemp -d)"
 mkdir -p "${tmpd}/src" "${tmpd}/out"
 printf '>chr1\nACGT\n' | gzip > "${tmpd}/src/genome.fna.gz"
@@ -629,8 +559,6 @@ assert_eq "fetch_and_decompress: content survives checksum verification" \
     "$(head -1 "${tmpd}/out/genome.fa" 2>/dev/null)" ">chr1"
 rm -rf "${tmpd}/out"; mkdir -p "${tmpd}/out"
 
-# The archive changes after its checksum was published — must be rejected,
-# not silently decompressed as a wrong-but-valid-gzip genome.
 printf '>chr1\nTTTT\n' | gzip > "${tmpd}/src/genome.fna.gz"
 assert_fails "fetch_and_decompress: rejects a checksum mismatch" \
     fetch_and_decompress "${tmpd}/out/genome.fa" "" "file://${tmpd}/src/genome.fna.gz"
@@ -638,9 +566,6 @@ assert_eq "fetch_and_decompress: mismatch left no output" \
     "$([[ -f "${tmpd}/out/genome.fa" ]] && echo yes || echo no)" "no"
 rm -rf "$tmpd"
 
-# --- STAR memory budget ------------------------------------------------------
-# MAX_MEMORY_GB must reach the one STAR run that can exhaust the machine: the
-# index build. The alignment runs unsorted, where STAR ignores a RAM limit.
 tmpd="$(mktemp -d)"
 (
     source "${PIPELINE_DIR}/steps/build_references.sh"
@@ -662,9 +587,6 @@ assert_eq "step_star: no --limitBAMsortRAM, the alignment does not sort" \
     "$(grep -c -- '--limitBAMsortRAM' "${PIPELINE_DIR}/steps/align.sh" || true)" "0"
 rm -rf "$tmpd"
 
-# --- setup.sh --species ------------------------------------------------------
-# A failed genome download must still exit non-zero, but not before printing
-# how to recover.
 tmpd="$(mktemp -d)"
 mkdir -p "${tmpd}/config" "${tmpd}/lib" "${tmpd}/steps"
 cp "${PIPELINE_DIR}/setup.sh" "$tmpd/"
@@ -682,9 +604,6 @@ assert_eq "setup --species: the next steps are printed even when a download fail
     "$(grep -c 'Setup complete. Next steps' <<< "$species_out")" "1"
 rm -rf "$tmpd"
 
-# --- single-instance lock ----------------------------------------------------
-# A second run in the same directory must refuse to start instead of fighting
-# over sra/, fastq/ and the tracker.
 if command -v flock &>/dev/null; then
     tmpd="$(mktemp -d)"
     mkdir -p "${tmpd}/tmp"
@@ -697,9 +616,6 @@ if command -v flock &>/dev/null; then
     rm -rf "$tmpd"
 fi
 
-# --- run_sample_loop ---------------------------------------------------------
-# Every sample must be visited even when a stage consumes stdin: the loop reads
-# samples.tsv up front instead of redirecting it into the stage commands.
 tmpd="$(mktemp -d)"
 printf 'SRR\tSPECIES\tLAYOUT\nA\tsp\tPAIRED\nB\tsp\tSINGLE\nC\tsp\tPAIRED\n' \
     > "${tmpd}/samples.tsv"
@@ -714,7 +630,6 @@ loop_seen="$(
 )" || true
 assert_eq "run_sample_loop: visits every sample when a stage reads stdin" "$loop_seen" "3"
 
-# Metadata columns after LAYOUT must not leak into the layout argument.
 printf 'SRR\tSPECIES\tLAYOUT\tTISSUE\nA\tsp\tPAIRED\tGut\n' > "${tmpd}/samples.tsv"
 loop_layout="$(
     source "${PIPELINE_DIR}/steps/process_sample.sh"
@@ -728,8 +643,6 @@ loop_layout="$(
 assert_eq "run_sample_loop: metadata columns do not leak into layout" "$loop_layout" "layout:PAIRED"
 rm -rf "$tmpd"
 
-# --- Strandedness ------------------------------------------------------------
-# A ratio of exactly 0.8 is not stranded enough for --forward-prob 1; 0.9 is.
 source "${PIPELINE_DIR}/steps/align.sh"
 tmpd="$(mktemp -d)"
 LOG_DIR="$tmpd"
@@ -745,11 +658,8 @@ assert_eq "_infer_strandedness: 0.1 is reverse-stranded"  "$(strand_case 10 90)"
 assert_eq "_infer_strandedness: no counts leaves defaults" "$(strand_case 0 0)"  "NA/0.5"
 rm -rf "$tmpd"
 
-# --- BBDuk trimming ----------------------------------------------------------
 source "${PIPELINE_DIR}/steps/trim.sh"
 
-# BBTools 39.81 hangs instead of failing when its threaded FASTQ reader asserts
-# on a header-carrying "+" line, so the assertion must stay disabled.
 assert_eq "step_bbduk: BBDuk runs with assertions disabled" \
     "${BBDUK_JVM_ARGS[*]}" "-da"
 
@@ -761,14 +671,12 @@ assert_fails "_files_present: false when one file is missing" \
     _files_present "${tmpd}/a" "${tmpd}/missing"
 rm -rf "$tmpd"
 
-# --- Syntax ------------------------------------------------------------------
 syntax_errors=0
 while IFS= read -r script; do
     bash -n "$script" || (( ++syntax_errors ))
 done < <(find "$PIPELINE_DIR" -name '*.sh' -type f | sort)
 assert_eq "all shell scripts parse" "$syntax_errors" "0"
 
-# --- Summary -----------------------------------------------------------------
 echo ""
 echo "Results: ${_pass} passed, ${_fail} failed."
 [[ "$_fail" -eq 0 ]]

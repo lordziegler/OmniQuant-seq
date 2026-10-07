@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# OmniQuant-seq — RNA-seq expression pipeline for any organism with a genome
-# and an annotation. Single entry point: parses the CLI, then delegates to the
-# modules in lib/ and steps/.
 
 set -euo pipefail
 
@@ -26,10 +23,6 @@ source "${PIPELINE_DIR}/steps/quantify.sh"
 source "${PIPELINE_DIR}/steps/process_sample.sh"
 source "${PIPELINE_DIR}/steps/postprocess.sh"
 
-# Reference dataset shipped with the repository: two paired-end
-# Helicoverpa armigera RNA-seq runs from the same BioProject (~1.5 GB SRA
-# total), so the demo's expression matrix demonstrates a real inner join.
-# EXAMPLE_SPECIES and EXAMPLE_READS come from config/pipeline.sh.
 EXAMPLE_RUN_TABLE="${PIPELINE_DIR}/examples/SraRunTable.example.csv"
 
 usage() {
@@ -101,7 +94,6 @@ Species are configured in config/species.sh. To add one interactively
 EOF
 }
 
-# --- Argument parsing --------------------------------------------------------
 BUILD_REFS_ONLY=false
 EXAMPLE_MODE=false
 FORCE_MENU=false
@@ -129,17 +121,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- Interactive menu --------------------------------------------------------
-# Bare `run.sh` on a terminal is a request for help, not for a production run;
-# without a terminal it keeps behaving as a scriptable default run.
 if [[ "$FORCE_MENU" == true ]] || { [[ "$NO_ARGS" == true ]] && [[ -t 0 ]]; }; then
     menu_main
     exit 0
 fi
 
-# --- Example mode overrides --------------------------------------------------
-# Restricts the run to the bundled dataset and keeps intermediates so the
-# demo is inspectable.
 if [[ "$EXAMPLE_MODE" == true ]]; then
     require_file "$EXAMPLE_RUN_TABLE" "The example RunTable is missing from the repository."
 
@@ -150,7 +136,6 @@ if [[ "$EXAMPLE_MODE" == true ]]; then
     CLEAN_RAW_FASTQ_AFTER_RSEM=false
     CLEAN_FASTQ_AFTER_RSEM=false
 
-    # Only the example species, regardless of what config/species.sh enables.
     species_config_load "${PIPELINE_DIR}/config/species.sh"
     example_idx="$(species_config_index "$EXAMPLE_SPECIES")"
     (( example_idx >= 0 )) || die \
@@ -158,13 +143,10 @@ if [[ "$EXAMPLE_MODE" == true ]]; then
     SPECIES_CONFIG=( "${EXAMPLE_SPECIES}|${SP_FNA[$example_idx]}|${SP_GTF[$example_idx]}|true" )
 fi
 
-# --- Setup -------------------------------------------------------------------
 mkdir -p "$LOG_DIR" "$TMP_DIR" "$RESULTS_DIR/rsem" \
          sra fastq clean_fastq fastqc_out
 
-# One run at a time: two pipelines sharing sra/, fastq/ and the tracker would
-# overwrite each other's intermediates. flock is Linux-only, so a system
-# without it simply runs unlocked rather than refusing to start.
+# One run per directory; without flock it runs unlocked.
 if command -v flock &>/dev/null; then
     LOCK_FILE="${TMP_DIR}/pipeline.lock"
     exec 200>"$LOCK_FILE"
@@ -189,13 +171,11 @@ echo " Test reads: ${TEST_READS}"
 echo " Species   : $(species_config_active_keys | paste -sd, - )"
 echo "============================================================"
 
-# --- Pre-flight --------------------------------------------------------------
 check_tools prefetch fastq-dump fasterq-dump fastqc multiqc \
             bbduk.sh STAR rsem-prepare-reference rsem-calculate-expression
 
 disk_usage "pipeline-start"
 
-# --- References --------------------------------------------------------------
 detect_local_references "."
 build_all_references
 
@@ -204,13 +184,9 @@ if [[ "$BUILD_REFS_ONLY" == true ]]; then
     exit 0
 fi
 
-# --- Samples -----------------------------------------------------------------
-# Only quantification runs need a RunTable, so this check comes after
-# --build-refs has had its chance to exit.
 detect_run_table "."
 parse_samples
 tracker_init
 run_sample_loop
 
-# --- Post-processing ---------------------------------------------------------
 postprocess_all

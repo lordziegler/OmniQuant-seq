@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Locates the pipeline's inputs in the project root.
-# Sets globals: RUN_TABLE (required), FNA_FILE / GTF_FILE (optional overrides).
+# Sets globals: RUN_TABLE, FNA_FILE, GTF_FILE.
 
-# Exactly one RunTable must be present, unless the caller already chose one
-# (e.g. run.sh --example).
 detect_run_table() {
     local search_dir="${1:-.}"
 
@@ -24,10 +21,7 @@ detect_run_table() {
     echo "[OK] RunTable : ${RUN_TABLE}"
 }
 
-# A genome FASTA and GTF in the project root override the download URLs, but
-# only when a single species is active — otherwise there is no way to tell
-# which species those files belong to, and using them for all of them would
-# silently quantify every organism against one genome.
+# Local files are used only with one active species: one genome cannot serve several.
 detect_local_references() {
     local search_dir="${1:-.}"
     local fnas gtfs active_count
@@ -43,9 +37,7 @@ detect_local_references() {
         return 0
     fi
 
-    # --example pins a single species of its own, which is exactly the
-    # condition that would accept these files: any unrelated genome lying in
-    # the working directory would become the demo's reference.
+    # The demo always uses its own reference.
     if [[ "${EXAMPLE_MODE:-false}" == true ]]; then
         echo "[WARN] Example mode ignores local FASTA/GTF files — the demo always"
         echo "       uses its own reference."
