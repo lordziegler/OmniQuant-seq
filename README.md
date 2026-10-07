@@ -369,7 +369,8 @@ OmniQuant-seq/
 │   └── postprocess.sh        # matrices, global MultiQC, preview
 ├── helpers/
 │   ├── parse_runtable.py     # RunTable (CSV/XLSX) → samples.tsv
-│   └── build_matrix.py       # results → expression and QC matrices
+│   ├── build_matrix.py       # results → expression and QC matrices
+│   └── sample_runtable.py    # random pilot subset (Cochran, 95% CI) + STAR_OVERHANG
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/

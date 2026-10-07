@@ -192,6 +192,31 @@ got_species="$(awk -F'\t' 'NR==2{print $2}' "${tmpd}/samples.tsv")"
 assert_eq "parse_runtable: species key from Organism" "$got_species" "Helicoverpa_armigera"
 rm -rf "$tmpd"
 
+# --- sample_runtable.py ------------------------------------------------------
+# 20 runs of 2x150 plus one PAIRED run mislabelled SINGLE (spot 300 read as one
+# 300 nt mate): Cochran gives n=20 of N=21, and the 95th percentile keeps the
+# mislabelled run from pushing STAR_OVERHANG to 299.
+tmpd="$(mktemp -d)"
+{
+    echo "Run,AvgSpotLen"
+    printf 'SRR3000%02d,300\n' $(seq 0 20)
+} > "${tmpd}/SraRunTable.csv"
+{
+    printf 'SRR\tSPECIES\tLAYOUT\n'
+    printf 'SRR3000%02d\tX_y\tPAIRED\n' $(seq 0 19)
+    printf 'SRR300020\tX_y\tSINGLE\n'
+} > "${tmpd}/samples.tsv"
+sr_out="$(python3 "${PIPELINE_DIR}/helpers/sample_runtable.py" \
+    --runtable "${tmpd}/SraRunTable.csv" --samples "${tmpd}/samples.tsv" \
+    --output "${tmpd}/pilot.csv")"
+assert_eq "sample_runtable: Cochran n with finite population correction" \
+    "$(grep -o 'n = [0-9]*' <<< "$sr_out")" "n = 20"
+assert_eq "sample_runtable: pilot RunTable has n rows" \
+    "$(awk 'NR>1' "${tmpd}/pilot.csv" | wc -l | tr -d ' ')" "20"
+assert_eq "sample_runtable: overhang ignores a mislabelled outlier" \
+    "$(grep -o 'census) = [0-9]*' <<< "$sr_out")" "census) = 149"
+rm -rf "$tmpd"
+
 # Any organism must resolve to a Genus_species key derived from the Organism
 # field, so the pipeline is not tied to a fixed taxon.
 tmpd="$(mktemp -d)"
