@@ -54,7 +54,7 @@ bash run.sh --full       # production run
 | Download | SRA-Toolkit (`prefetch`, `fastq-dump`, `fasterq-dump`) | 3.4.1 | `.sra` → FASTQ |
 | Quality | FastQC | 0.12.1 | Per-sample QC, before and after trimming |
 | Trimming | BBDuk (BBMap) | 39.81 | Quality-trimmed FASTQ |
-| Alignment | STAR | 2.7.10a | Genome BAM + transcriptome BAM |
+| Alignment | STAR, or STARlong for reads over 500 nt (PacBio, Nanopore, 454) | 2.7.10a | Genome BAM + transcriptome BAM |
 | Quantification | RSEM | 1.3.3 (`--version` banner reports 1.3.1 — upstream string lag, not a version mismatch) | `genes.results`, `isoforms.results` |
 | QC report | MultiQC | 1.14 (needs `setuptools<81`, pinned in `environment.yml`) | Per-sample and global reports |
 | Aggregation | Python + openpyxl | 3.11 / 3.1.5, both pinned exactly | Expression matrix + QC matrices |
@@ -64,7 +64,10 @@ whichever is present. `flock` (util-linux) is used for the run lock when
 available; without it a run simply starts unlocked.
 
 STAR runs with the ENCODE long-RNA-seq options, collected in one array at the
-top of `steps/align.sh`.
+top of `steps/align.sh`. A sample whose reads exceed 500 nt goes to STARlong
+instead, with the STAR manual's long-read options and the same index. RSEM only
+accepts alignments without indels, so long reads carrying them are left out of
+the quantification; `MIN_UNIQUE_MAPPED_PCT` still guards the mapping rate.
 
 ---
 
@@ -204,8 +207,7 @@ species so only organisms you have references for reach `samples.tsv`. It reads
 `.csv` or `.xlsx`, keeps `RNA-Seq` records whose `LibrarySource` is
 `TRANSCRIPTOMIC` or `GENOMIC` (falling back to all RNA-Seq rows, with a
 warning, if none pass), derives the `Genus_species` key from `Organism`,
-drops runs from long-read or colorspace platforms (PacBio, Nanopore, 454,
-SOLiD), deduplicates by accession, validates it against `^[SED]RR\d+$`, and writes
+drops SOLiD runs (colorspace, which STAR cannot align), deduplicates by accession, validates it against `^[SED]RR\d+$`, and writes
 `SRR`, `SPECIES`, `LAYOUT` followed by the sample metadata a design formula
 needs: `TISSUE`, `PLATFORM`, `INSTRUMENT`, `BIOPROJECT`, `DEV_STAGE`, `SEX`,
 `TREATMENT`. Each one takes the first informative value among the RunTable
@@ -386,7 +388,7 @@ OmniQuant-seq/
 ├── examples/
 │   └── SraRunTable.example.csv
 └── tests/
-    └── test_pipeline.sh      # 122 unit tests, no external tools, no network
+    └── test_pipeline.sh      # 127 unit tests, no external tools, no network
 ```
 
 `run.sh` parses flags and calls four functions in order: `build_all_references`,
@@ -401,7 +403,7 @@ tracking — live in `lib/` and are never reimplemented inside a step.
 
 ```bash
 bash tests/test_pipeline.sh
-# Results: 122 passed, 0 failed.
+# Results: 127 passed, 0 failed.
 ```
 
 No bioinformatics tool and no network access required. Covers layout

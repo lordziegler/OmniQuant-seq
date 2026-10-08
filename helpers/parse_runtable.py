@@ -20,8 +20,9 @@ METADATA = {
     "TREATMENT": ("treatment", "Diet"),
 }
 
-# STAR/RSEM as configured here take short base-space reads only.
-UNSUPPORTED_PLATFORMS = {"PACBIO_SMRT", "OXFORD_NANOPORE", "LS454", "ABI_SOLID"}
+# SOLiD runs come as colorspace, which STAR cannot align. Long reads are fine:
+# steps/align.sh switches to STARlong for them.
+UNSUPPORTED_PLATFORMS = {"ABI_SOLID"}
 
 # INSDC placeholders, written as NA so they never become a factor level.
 _NULLS = {
@@ -142,7 +143,8 @@ def main() -> None:
         type=int,
         default=None,
         help="STAR_OVERHANG in use for the shared index (sjdbOverhang). When "
-        "given, warns about samples whose AvgSpotLen is far from "
+        "given, warns about samples whose mate length (AvgSpotLen, halved for "
+        "PAIRED) is far from "
         "overhang+1, since one index serves every run of a species.",
     )
     p.add_argument(
@@ -207,7 +209,7 @@ def main() -> None:
     ]
     if len(supported) < len(sourced):
         print(
-            f"[WARN] {len(sourced) - len(supported)} runs from long-read or colorspace "
+            f"[WARN] {len(sourced) - len(supported)} runs from colorspace "
             f"platforms excluded ({', '.join(sorted(UNSUPPORTED_PLATFORMS))})."
         )
 
@@ -237,12 +239,14 @@ def main() -> None:
 
         if expected_len:
             try:
-                avg_len = float(_get(r, "AvgSpotLen", "avg_spot_len"))
+                spot = float(_get(r, "AvgSpotLen", "avg_spot_len"))
             except ValueError:
-                avg_len = 0
-            if avg_len and not (0.5 * expected_len <= avg_len <= 2 * expected_len):
+                spot = 0
+            # A PAIRED spot holds both mates; the overhang is per mate.
+            mate_len = spot / 2 if layout == "PAIRED" else spot
+            if mate_len and not (0.5 * expected_len <= mate_len <= 2 * expected_len):
                 print(
-                    f"[WARN] {srr}: AvgSpotLen={avg_len:.0f} nt is far from "
+                    f"[WARN] {srr}: mate length {mate_len:.0f} nt is far from "
                     f"STAR_OVERHANG+1={expected_len} nt — the shared per-species index "
                     f"may be poorly matched for this run's read length."
                 )

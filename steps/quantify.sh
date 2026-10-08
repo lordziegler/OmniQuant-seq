@@ -18,6 +18,8 @@ step_rsem() {
         --forward-prob     "${FORWARD_PROB:-0.5}"
     )
     [[ "$layout" == "PAIRED" ]] && base_args+=( --paired-end )
+    # RSEM caps read length at --fragment-length-max (default 1000) and crashes past it.
+    (( ${READ_MAX_NT:-0} > 1000 )) && base_args+=( --fragment-length-max "$READ_MAX_NT" )
 
     "${base_args[@]}" \
         "$BAM_PATH" \

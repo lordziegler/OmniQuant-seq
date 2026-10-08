@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bash tests/test_pipeline.sh — no bioinformatics tools, no network.
-# shellcheck disable=SC2154,SC2030  # printf -v targets; subshells isolate tests
+# shellcheck disable=SC2154,SC2030,SC2329  # printf -v targets; subshells isolate tests; stubs called via "$star"
 set -euo pipefail
 
 PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -289,6 +289,12 @@ assert_eq "parse_runtable: --star-overhang warns on mismatched read length" \
     "$(grep -qi "far from STAR_OVERHANG" <<< "$overhang_out" && echo yes || echo no)" "yes"
 ov_rows="$(awk 'NR>1' "${tmpd}/spotlen.tsv" 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
 assert_eq "parse_runtable: --star-overhang keeps the sample" "$ov_rows" "1"
+
+printf 'SRR800002,RNA-Seq,TRANSCRIPTOMIC,PAIRED,Helicoverpa armigera,300\n' >> "${tmpd}/spotlen.csv"
+paired_out="$(python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
+    --input "${tmpd}/spotlen.csv" --output "${tmpd}/spotlen.tsv" --star-overhang 99 2>&1)"
+assert_eq "parse_runtable: --star-overhang compares a PAIRED run per mate (2x150)" \
+    "$(grep -c "SRR800002" <<< "$paired_out")" "0"
 rm -rf "$tmpd"
 
 tmpd="$(mktemp -d)"
@@ -323,11 +329,11 @@ SRR920003,RNA-Seq,TRANSCRIPTOMIC,SINGLE,Helicoverpa armigera,ABI_SOLID
 CSV
 python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
     --input "${tmpd}/platforms.csv" --output "${tmpd}/platforms.tsv" >/dev/null 2>&1 || true
-assert_eq "parse_runtable: long-read and colorspace platforms are excluded" \
-    "$(awk -F'\t' 'NR>1{print $1}' "${tmpd}/platforms.tsv" 2>/dev/null)" "SRR920001"
+assert_eq "parse_runtable: long reads are kept, colorspace is excluded" \
+    "$(awk -F'\t' 'NR>1{print $1}' "${tmpd}/platforms.tsv" 2>/dev/null | paste -sd, -)" "SRR920001,SRR920002"
 assert_fails "parse_runtable: --runs aborts on a run from an excluded platform" \
     python3 "${PIPELINE_DIR}/helpers/parse_runtable.py" \
-    --input "${tmpd}/platforms.csv" --output "${tmpd}/platforms2.tsv" --runs SRR920002
+    --input "${tmpd}/platforms.csv" --output "${tmpd}/platforms2.tsv" --runs SRR920003
 assert_eq "parse_runtable: --runs keeps only the named accession" \
     "$(awk -F'\t' 'NR>1{print $1"/"$3}' "${tmpd}/runs.tsv" 2>/dev/null)" "SRR910002/SINGLE"
 assert_fails "parse_runtable: --runs aborts on an accession filtered out" \
@@ -685,6 +691,39 @@ star_case() {
 }
 assert_eq "step_star: a sample mapping 0% fails (small-RNA library)" "$(star_case 0.00)" "fail"
 assert_eq "step_star: a sample mapping 85% passes" "$(star_case 85.20)" "pass"
+
+aligner_case() {
+    (
+        TMP_DIR="$tmpd" THREADS_STAR=8 MAX_MEMORY_GB=3 STAR_INDEX=x CLEAN_SE="${tmpd}/r.fq"
+        printf '@r\n%s\n+\n%s\n' "$(printf 'A%.0s' $(seq "$1"))" "$(printf 'I%.0s' $(seq "$1"))" > "$CLEAN_SE"
+        disk_usage() { :; }
+        fake_star() {
+            echo "$1/$3" > "${tmpd}/aligner"
+            touch "${tmpd}/S_star/Aligned.toTranscriptome.out.bam"
+        }
+        STAR() { fake_star STAR "$@"; }
+        STARlong() { fake_star STARlong "$@"; }
+        step_star S SINGLE >/dev/null 2>&1
+        cat "${tmpd}/aligner"
+    )
+}
+assert_eq "step_star: 150 nt reads go to STAR, all threads" "$(aligner_case 150)" "STAR/8"
+assert_eq "step_star: 800 nt reads go to STARlong, threads capped by MAX_MEMORY_GB" \
+    "$(aligner_case 800)" "STARlong/1"
+
+source "${PIPELINE_DIR}/steps/quantify.sh"
+rsem_args() {
+    (
+        TMP_DIR="$tmpd" THREADS_RSEM=1 BAM_PATH=b RSEM_REF=r READ_MAX_NT="$1"
+        disk_usage() { :; }
+        rsem-calculate-expression() { echo "$*" > "${tmpd}/rsem_args"; touch "${tmpd}/out/S.genes.results"; }
+        mkdir -p "${tmpd}/out"
+        step_rsem S SINGLE "${tmpd}/out" >/dev/null 2>&1
+        grep -o -- '--fragment-length-max [0-9]*' "${tmpd}/rsem_args" || echo none
+    )
+}
+assert_eq "step_rsem: reads past 1000 nt raise --fragment-length-max" "$(rsem_args 1181)" "--fragment-length-max 1181"
+assert_eq "step_rsem: short reads keep RSEM's default" "$(rsem_args "")" "none"
 rm -rf "$tmpd"
 
 source "${PIPELINE_DIR}/steps/trim.sh"

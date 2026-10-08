@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sets global: BAM_PATH.
+# Sets globals: BAM_PATH, READ_MAX_NT (longest read, long-read samples only).
 
 # ENCODE long-RNA-seq options.
 _STAR_FLAGS=(
@@ -19,6 +19,33 @@ _STAR_FLAGS=(
     --quantMode               TranscriptomeSAM GeneCounts
 )
 
+# STARlong, for reads past LONG_READ_NT (PacBio, Nanopore, 454): the STAR
+# manual's long-read seeding and filtering, same index and outputs.
+LONG_READ_NT=500
+_STARLONG_FLAGS=(
+    --outSAMtype              BAM Unsorted
+    --outSAMunmapped          Within
+    --outSAMattributes        NH HI AS NM MD
+    --outFilterMultimapScoreRange 20
+    --outFilterScoreMinOverLread  0
+    --outFilterMatchNminOverLread 0.66
+    --outFilterMismatchNmax   1000
+    --winAnchorMultimapNmax   200
+    --seedSearchLmax          30
+    --seedSearchStartLmax     12
+    --seedPerReadNmax         100000
+    --seedPerWindowNmax       100
+    --alignTranscriptsPerReadNmax   100000
+    --alignTranscriptsPerWindowNmax 10000
+    --alignIntronMax          1000000
+    --quantMode               TranscriptomeSAM GeneCounts
+)
+
+# Longest read among the first N reads of a FASTQ (default 10,000; 0 = all).
+_max_read_len() {
+    { zcat -f "$1" | awk -v n="${2:-10000}" 'NR % 4 == 2 && length($0) > m { m = length($0) } n && NR >= 4 * n { exit } END { print m + 0 }'; } 2>/dev/null || true
+}
+
 step_star() {
     local srr="$1" layout="$2"
     local out_prefix="${TMP_DIR}/${srr}_star/"
@@ -35,16 +62,30 @@ step_star() {
     local read_files_command="cat"
     [[ "${reads[0]}" == *.gz ]] && read_files_command="zcat"
 
-    log_step "$srr" "STAR" "Aligning (${layout}, ${THREADS_STAR} threads) ..."
+    local star=STAR flags=( "${_STAR_FLAGS[@]}" ) threads="$THREADS_STAR" longest
+    longest="$(_max_read_len "${reads[0]}")"
+    READ_MAX_NT=""
+    if (( longest > LONG_READ_NT )); then
+        # The whole file, not a sample: RSEM corrupts memory past this length.
+        READ_MAX_NT="$(_max_read_len "${reads[0]}" 0)"
+        longest="$READ_MAX_NT"
+        # ponytail: ~2 GB per STARlong thread (2.1 GB peak, 1 thread, 454 reads);
+        # re-measure if the long-read seeding options change.
+        star=STARlong flags=( "${_STARLONG_FLAGS[@]}" )
+        threads=$(( MAX_MEMORY_GB / 2 < 1 ? 1 : MAX_MEMORY_GB / 2 ))
+        (( threads > THREADS_STAR )) && threads="$THREADS_STAR"
+    fi
+
+    log_step "$srr" "STAR" "Aligning with ${star} (${layout}, reads up to ${longest} nt, ${threads} threads) ..."
     disk_usage "pre-STAR [${srr}]"
 
-    STAR \
-        --runThreadN          "$THREADS_STAR" \
+    "$star" \
+        --runThreadN          "$threads" \
         --genomeDir           "$STAR_INDEX" \
         --readFilesCommand    "$read_files_command" \
         --outFileNamePrefix   "$out_prefix" \
         --readFilesIn         "${reads[@]}" \
-        "${_STAR_FLAGS[@]}" \
+        "${flags[@]}" \
         > "$star_log" 2>&1
 
     BAM_PATH="${out_prefix}Aligned.toTranscriptome.out.bam"
